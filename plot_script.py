@@ -9,7 +9,13 @@ colors_map = {
     'ic3net': '#dc8d6d',
     'commnet': '#5785c1',
     'maddpg': '#78b38a',
-    'maac': '#ba71af'
+    'maac': '#ba71af',
+    'gc_ic3net': '#ff6373',
+    'gc_commnet': '#dec718',
+    'tar_ic3net': '#9d62c4',
+    'tar_commnet': '#62c4b9',
+    'gacomm': '#77ab3f',
+    'other': '#fa9e25'
 }
 
 def read_file(vec, file_name, term):
@@ -58,14 +64,26 @@ def parse_plot(files, term='Reward'):
     episode_coll = dict()
     for fname in files:
         f = fname.split('.')
-        if 'ic3net' in fname:
+        if 'ic3net' in fname and not 'gc' in fname and not 'tar' in fname:
             label = 'ic3net'
-        elif 'commnet' in fname:
+        elif 'commnet' in fname and not 'gc' in fname and not 'tar' in fname:
             label = 'commnet'
         elif 'maac' in fname:
             label = 'maac'
-        else:
+        elif 'maddpg' in fname:
             label = 'maddpg'
+        elif 'gc_ic3net' in fname:
+            label = 'gc_ic3net'
+        elif 'gc_commnet' in fname:
+            label = 'gc_commnet'
+        elif 'tar_ic3net' in fname:
+            label = 'tar_ic3net'
+        elif 'tar_commnet' in fname:
+            label = 'tar_commnet'
+        elif 'gacomm' in fname:
+            label = 'gacomm'
+        else:
+            label = 'other'
 
         if label not in coll:
             coll[label] = []
@@ -110,7 +128,7 @@ def parse_plot(files, term='Reward'):
     plt.ylabel(term)
     plt.legend()
     plt.grid()
-    plt.title('GFootball {} {}'.format(sys.argv[2], term))
+#     plt.title('GFootball {} {}'.format(sys.argv[2], term))
 
 files = glob.glob(sys.argv[1] + "*")
 files = list(filter(lambda x: x.find(".pt") == -1, files))

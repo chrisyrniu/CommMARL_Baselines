@@ -96,7 +96,7 @@ parser.add_argument('--ic3net', action='store_true', default=False,
                     help="enable ic3net model")
 parser.add_argument('--gccomm', action='store_true', default=False,
                     help="enable gccomm model (with commnet or ic3net)")
-parser.add_argument('--tarcom', action='store_true', default=False,
+parser.add_argument('--tarcomm', action='store_true', default=False,
                     help="enable tarmac model (with commnet or ic3net)")
 parser.add_argument('--gacomm', action='store_true', default=False,
                     help="enable gacomm model")
@@ -147,8 +147,9 @@ if hasattr(args, 'enemy_comm') and args.enemy_comm:
     else:
         raise RuntimeError("Env. needs to pass argument 'nenemy'.")
 
-render = args.render
-args.render = False
+if args.env_name == 'grf':
+    render = args.render
+    args.render = False
 env = data.init(args.env_name, args, False)
 
 num_inputs = env.observation_dim
@@ -208,7 +209,8 @@ disp_trainer.display = True
 def disp():
     x = disp_trainer.get_episode()
 
-args.render = render
+if args.env_name == 'grf':
+    args.render = render
 if args.nprocesses > 1:
     trainer = MultiProcessTrainer(args, lambda: Trainer(args, policy_net, data.init(args.env_name, args)))
 else:

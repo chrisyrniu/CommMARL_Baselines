@@ -13,6 +13,7 @@ python -u main.py \
   --detach_gap 10 \
   --lrate 0.001 \
   --ic3net \
+  --tarcomm \
   --recurrent \
   --save \
   --save_every 50 \

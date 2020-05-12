@@ -76,6 +76,8 @@ parser.add_argument('--plot', action='store_true', default=False,
                     help='plot training progress')
 parser.add_argument('--plot_env', default='main', type=str,
                     help='plot env name')
+parser.add_argument('--plot_port', default='8097', type=str,
+                    help='plot port')
 parser.add_argument('--save', action="store_true", default=False,
                     help='save the model after training')
 parser.add_argument('--save_every', default=0, type=int,
@@ -230,7 +232,7 @@ log['action_loss'] = LogField(list(), True, 'epoch', 'num_steps')
 log['entropy'] = LogField(list(), True, 'epoch', 'num_steps')
 
 if args.plot:
-    vis = visdom.Visdom(env=args.plot_env)
+    vis = visdom.Visdom(env=args.plot_env, port=args.plot_port)
 
 if args.gacomm:
     model_dir = Path('./saved') / args.env_name / 'gacomm'

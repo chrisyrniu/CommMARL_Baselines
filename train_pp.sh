@@ -21,6 +21,7 @@ python -u main.py \
 
   # --plot \
   # --plot_env predator_prey \
+  # --plot_port 8009 \
 
   ## easy
   # --nagents 3 \

@@ -24,6 +24,7 @@ python -u main.py \
 
   # --plot \
   # --plot_env traffic_juction \
+  # --plot_port 8009 \
 
   ## easy
   # --nagents 5 \

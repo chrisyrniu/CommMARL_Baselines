@@ -10,7 +10,7 @@ python -u main.py \
   --detach_gap 10 \
   --lrate 0.0015 \
   --max_steps 100 \
-  --commnet \
+  --ic3net \
   --tarcomm \
   --recurrent \
   --save \
@@ -19,8 +19,10 @@ python -u main.py \
   --num_controlled_lagents 3 \
   --num_controlled_ragents 0 \
   --reward_type scoring \
+  --seed 0 \
+  --plot \
+  --plot_env grf_tar_ic3net_scoring_hid_128_adv_0_seed0 \
+  --plot_port 8009 \
   | tee train.log
 
 #  --render \
-#   --plot \
-#   --plot_env magcc_scoring_1000_hid_128_adv_0_gc_commnet1 \

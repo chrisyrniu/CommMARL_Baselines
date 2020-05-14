@@ -10,17 +10,22 @@ python -u main.py \
   --difficulty easy \
   --vision 0 \
   --nprocesses 4 \
-  --num_epochs 1000 \
+  --num_epochs 2000 \
   --epoch_size 10 \
   --hid_size 128 \
   --detach_gap 10 \
   --lrate 0.001 \
-  --ic3net \
+  --gacomm \
   --recurrent \
   --curr_start 250 \
   --curr_end 1250 \
   --save \
-  | tee train.log
+  --save_every 100 \
+  --seed 0 \
+  --plot \
+  --plot_env tj_ic3net_hid_128_seed0 \
+  --plot_port 8009 \
+  | tee train_tj.log
 
   # --plot \
   # --plot_env traffic_juction \

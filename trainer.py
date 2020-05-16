@@ -10,20 +10,25 @@ from action_utils import *
 Transition = namedtuple('Transition', ('state', 'action', 'action_out', 'value', 'episode_mask', 'episode_mini_mask', 'next_state',
                                        'reward', 'misc'))
 
-
 class Trainer(object):
     def __init__(self, args, policy_net, env):
         self.args = args
-        self.policy_net = policy_net
+        self.device = torch.device("cuda" if torch.cuda.is_available() and self.args.use_gpu else "cpu")
+        self.policy_net = policy_net.to(self.device)
         self.env = env
         self.display = False
         self.last_step = False
         self.optimizer = optim.RMSprop(policy_net.parameters(),
             lr = args.lrate, alpha=0.97, eps=1e-6)
         self.params = [p for p in self.policy_net.parameters()]
-
+#         for name, param in self.policy_net.named_parameters():
+#             print(name)
+        
 
     def get_episode(self, epoch):
+#         if self.args.use_gpu:
+#             self.policy_net = self.policy_net.to(torch.device("cpu"))        
+
         episode = []
         reset_args = getargspec(self.env.reset).args
         if 'epoch' in reset_args:
@@ -48,7 +53,8 @@ class Trainer(object):
             if self.args.recurrent:
                 if self.args.rnn_type == 'LSTM' and t == 0:
                     prev_hid = self.policy_net.init_hidden(batch_size=state.shape[0])
-
+                
+                state = torch.Tensor(state).to(self.device)
                 x = [state, prev_hid]
                 action_out, value, prev_hid = self.policy_net(x, info)
 
@@ -126,34 +132,43 @@ class Trainer(object):
 
     def compute_grad(self, batch):
         stat = dict()
+        # action space
         num_actions = self.args.num_actions
+        # number of action head
         dim_actions = self.args.dim_actions
 
         n = self.args.nagents
         batch_size = len(batch.state)
 
-        rewards = torch.Tensor(batch.reward)
-        episode_masks = torch.Tensor(batch.episode_mask)
-        episode_mini_masks = torch.Tensor(batch.episode_mini_mask)
-        actions = torch.Tensor(batch.action)
+        # size: batch_size * nagents
+        rewards = torch.Tensor(batch.reward).to(self.device)
+        # size: batch_size * nagents
+        episode_masks = torch.Tensor(batch.episode_mask).to(self.device)
+        # size: batch_size * nagents
+        episode_mini_masks = torch.Tensor(batch.episode_mini_mask).to(self.device)
+        actions = torch.Tensor(batch.action).to(self.device)
+        # size: batch_size * nagents * 1.  have been detached
         actions = actions.transpose(1, 2).view(-1, n, dim_actions)
 
         # old_actions = torch.Tensor(np.concatenate(batch.action, 0))
         # old_actions = old_actions.view(-1, n, dim_actions)
         # print(old_actions == actions)
 
-        # can't do batch forward.
-        values = torch.cat(batch.value, dim=0)
+        # can't do batch forward! because of the recurrent structure
+        # size: (batch_size*nagents) * 1
+        values = torch.cat(batch.value, dim=0).to(self.device)
         action_out = list(zip(*batch.action_out))
-        action_out = [torch.cat(a, dim=0) for a in action_out]
+        # size: batch_size * nagents * num_actions
+        action_out = [torch.cat(a, dim=0).to(self.device) for a in action_out]
 
-        alive_masks = torch.Tensor(np.concatenate([item['alive_mask'] for item in batch.misc])).view(-1)
+        # size: (batch_size*nagents)
+        alive_masks = torch.Tensor(np.concatenate([item['alive_mask'] for item in batch.misc])).view(-1).to(self.device)
 
-        coop_returns = torch.Tensor(batch_size, n)
-        ncoop_returns = torch.Tensor(batch_size, n)
-        returns = torch.Tensor(batch_size, n)
-        deltas = torch.Tensor(batch_size, n)
-        advantages = torch.Tensor(batch_size, n)
+        coop_returns = torch.Tensor(batch_size, n).to(self.device)
+        ncoop_returns = torch.Tensor(batch_size, n).to(self.device)
+        returns = torch.Tensor(batch_size, n).to(self.device)
+        deltas = torch.Tensor(batch_size, n).to(self.device)
+        advantages = torch.Tensor(batch_size, n).to(self.device)
         values = values.view(batch_size, n)
 
         prev_coop_return = 0
@@ -163,6 +178,7 @@ class Trainer(object):
 
         for i in reversed(range(rewards.size(0))):
             coop_returns[i] = rewards[i] + self.args.gamma * prev_coop_return * episode_masks[i]
+            # in the tj env, episode_mini_masks[i] mask the rewards of the car that is complete
             ncoop_returns[i] = rewards[i] + self.args.gamma * prev_ncoop_return * episode_masks[i] * episode_mini_masks[i]
 
             prev_coop_return = coop_returns[i].clone()
@@ -186,11 +202,14 @@ class Trainer(object):
             actions = actions.contiguous().view(-1, dim_actions)
 
             if self.args.advantages_per_action:
+                # size: (batch_size*nagents) * dim_actions
                 log_prob = multinomials_log_densities(actions, log_p_a)
             else:
+                # size: (batch_size*nagents) * 1
                 log_prob = multinomials_log_density(actions, log_p_a)
 
         if self.args.advantages_per_action:
+            # each head of actions is multiplied by the advantages
             action_loss = -advantages.view(-1).unsqueeze(-1) * log_prob
             action_loss *= alive_masks.unsqueeze(-1)
         else:
@@ -219,7 +238,7 @@ class Trainer(object):
                 loss -= self.args.entr * entropy
 
         loss.backward()
-
+        
         return stat
 
     def run_batch(self, epoch):
@@ -242,15 +261,29 @@ class Trainer(object):
     # only used when nprocesses=1
     def train_batch(self, epoch):
         batch, stat = self.run_batch(epoch)
-        self.optimizer.zero_grad()
-
+#         self.policy_net = self.policy_net.to(self.device)
+#         for param in self.optimizer.param_groups:
+#             for p in param['params']:
+#                 if p.grad is not None:
+#                     print(p.grad.device)
         s = self.compute_grad(batch)
         merge_stat(s, stat)
         for p in self.params:
             if p._grad is not None:
+#                 print(p._grad.device)
                 p._grad.data /= stat['num_steps']
+                
+#         for param in self.policy_net.parameters():
+#             if param.grad is not None:
+#                 param.grad = param.grad.to(self.device)
+# #                 print(param.grad.device)
+#         for param in self.optimizer.param_groups:
+#             for p in param['params']:
+#                 if p.grad is not None:
+#                     p.grad = p.grad.to(self.device)
+# #                     print(p.grad.device)
         self.optimizer.step()
-
+        self.optimizer.zero_grad()
         return stat
 
     def state_dict(self):

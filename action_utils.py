@@ -38,7 +38,7 @@ def select_action(args, action_out):
 def translate_action(args, env, action):
     if args.num_actions[0] > 0:
         # environment takes discrete action
-        action = [x.squeeze().data.numpy() for x in action]
+        action = [x.cpu().squeeze().data.numpy() for x in action]
         actual = action
         return action, actual
     else:

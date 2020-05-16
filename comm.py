@@ -38,10 +38,10 @@ class CommNetMLP(nn.Module):
 
         # Mask for communication
         if self.args.comm_mask_zero:
-            self.comm_mask = torch.zeros(self.nagents, self.nagents)
+            self.comm_mask = torch.zeros(self.nagents, self.nagents).cuda()
         else:
-            self.comm_mask = torch.ones(self.nagents, self.nagents) \
-                            - torch.eye(self.nagents, self.nagents)
+            self.comm_mask = torch.ones(self.nagents, self.nagents).cuda() \
+                            - torch.eye(self.nagents, self.nagents).cuda()
 
 
         # Since linear layers in PyTorch now accept * as any number of dimensions
@@ -54,7 +54,7 @@ class CommNetMLP(nn.Module):
         #     self.state_encoder = nn.Linear(num_inputs, num_inputs)
         #     self.encoder = nn.Linear(num_inputs * 2, args.hid_size)
         if args.recurrent:
-            self.hidd_encoder = nn.Linear(args.hid_size, args.hid_size)
+            self.hidd_encoder = nn.Linear(args.hid_size, args.hid_size).cuda()
 
         if args.recurrent:
             self.init_hidden(args.batch_size)
@@ -107,7 +107,7 @@ class CommNetMLP(nn.Module):
             num_agents_alive = n
 
         agent_mask = agent_mask.view(1, 1, n)
-        agent_mask = agent_mask.expand(batch_size, n, n).unsqueeze(-1).clone() # clone gives the full tensor and avoid the error
+        agent_mask = agent_mask.expand(batch_size, n, n).unsqueeze(-1).clone().cuda() # clone gives the full tensor and avoid the error
 
         return num_agents_alive, agent_mask
 
@@ -161,7 +161,6 @@ class CommNetMLP(nn.Module):
         #     x = self.tanh(x)
 
         x, hidden_state, cell_state = self.forward_state_encoder(x)
-
         batch_size = x.size()[0]
         n = self.nagents
 
@@ -170,7 +169,7 @@ class CommNetMLP(nn.Module):
         # Hard Attention - action whether an agent communicates or not
         if self.args.hard_attn:
             comm_action = torch.tensor(info['comm_action'])
-            comm_action_mask = comm_action.expand(batch_size, n, n).unsqueeze(-1)
+            comm_action_mask = comm_action.expand(batch_size, n, n).unsqueeze(-1).cuda()
             # action 1 is talk, 0 is silent i.e. act as dead for comm purposes.
             agent_mask *= comm_action_mask.double()
 
@@ -203,6 +202,7 @@ class CommNetMLP(nn.Module):
 
             # Combine all of C_j for an ith agent which essentially are h_j
             comm_sum = comm.sum(dim=1)
+            
             c = self.C_modules[i](comm_sum)
 
 
@@ -249,6 +249,6 @@ class CommNetMLP(nn.Module):
 
     def init_hidden(self, batch_size):
         # dim 0 = num of layers * num of direction
-        return tuple(( torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True),
-                       torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True)))
+        return tuple(( torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True).cuda(),
+                       torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True).cuda()))
 

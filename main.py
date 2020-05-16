@@ -11,7 +11,7 @@ import visdom
 import data
 from models import *
 from comm import CommNetMLP
-from gc_comm import GCCommNetMLP
+# from gc_comm import GCCommNetMLP
 from ga_comm import GACommNetMLP
 from tar_comm import TarCommNetMLP
 from utils import *
@@ -62,6 +62,8 @@ parser.add_argument('--entr', type=float, default=0,
                     help='entropy regularization coeff')
 parser.add_argument('--value_coeff', type=float, default=0.01,
                     help='coeff for value loss term')
+parser.add_argument('--use_gpu', action='store_true', default=False,
+                    help='use gpu to train')
 # environment
 parser.add_argument('--env_name', default="Cartpole",
                     help='name of the environment to run')
@@ -111,7 +113,7 @@ parser.add_argument('--comm_passes', type=int, default=1,
 parser.add_argument('--comm_mask_zero', action='store_true', default=False,
                     help="Whether communication should be there")
 parser.add_argument('--mean_ratio', default=1.0, type=float,
-                    help='how much coooperative to do? 1.0 means fully cooperative')
+                    help='how much cooperative to do? 1.0 means fully cooperative')
 parser.add_argument('--rnn_type', default='MLP', type=str,
                     help='type of rnn to use. [LSTM|MLP]')
 parser.add_argument('--detach_gap', default=10000, type=int,
@@ -186,9 +188,9 @@ print(args)
 if args.gacomm:
     policy_net = GACommNetMLP(args, num_inputs)
 elif args.commnet:
-    if args.gccomm:
-        policy_net = GCCommNetMLP(args, num_inputs)
-    elif args.tarcomm:
+#     if args.gccomm:
+#         policy_net = GCCommNetMLP(args, num_inputs)
+    if args.tarcomm:
         policy_net = TarCommNetMLP(args, num_inputs)
     else:
         policy_net = CommNetMLP(args, num_inputs)

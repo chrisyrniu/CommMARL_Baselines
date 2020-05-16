@@ -9,27 +9,25 @@ python -u main.py \
   --add_rate_max 0.3 \
   --difficulty easy \
   --vision 0 \
-  --nprocesses 4 \
+  --nprocesses 1 \
   --num_epochs 2000 \
   --epoch_size 10 \
   --hid_size 128 \
   --detach_gap 10 \
   --lrate 0.001 \
-  --gacomm \
+  --ic3net \
   --recurrent \
   --curr_start 250 \
   --curr_end 1250 \
   --save \
   --save_every 100 \
   --seed 0 \
-  --plot \
-  --plot_env tj_ic3net_hid_128_seed0 \
-  --plot_port 8009 \
+  --use_gpu \
   | tee train_tj.log
 
-  # --plot \
-  # --plot_env traffic_juction \
-  # --plot_port 8009 \
+#   --plot \
+#   --plot_env tj_gacomm_hid_128_seed0 \
+#   --plot_port 8009 \
 
   ## easy
   # --nagents 5 \

@@ -1,4 +1,4 @@
-from collections import namedtuple
+ from collections import namedtuple
 from inspect import getargspec
 import numpy as np
 import torch
@@ -7,20 +7,27 @@ import torch.nn as nn
 from utils import *
 from action_utils import *
 
-Transition = namedtuple('Transition', ('state', 'action', 'action_out', 'value', 'episode_mask', 'episode_mini_mask', 'next_state',
-                                       'reward', 'misc'))
+Transition = namedtuple('Transition', ('state', 'hidden_state', 'action', 'action_out', 'episode_mask', 'episode_mini_mask', 'next_state', 'reward', 'misc'))
 
 
 class Trainer(object):
-    def __init__(self, args, policy_net, env):
+    def __init__(self, args, actor, critic, target_critic, env):
         self.args = args
-        self.policy_net = policy_net
+        self.actor = actor
+        self.critic = critic
+        self.target_critic = target_critic
         self.env = env
         self.display = False
         self.last_step = False
-        self.optimizer = optim.RMSprop(policy_net.parameters(),
-            lr = args.lrate, alpha=0.97, eps=1e-6)
-        self.params = [p for p in self.policy_net.parameters()]
+        
+        self.actor_optimizer = optim.RMSprop(actor.parameters(),
+            lr = args.actor_lrate, alpha=0.97, eps=1e-6)
+        self.critic_optimizer = optim.RMSprop(critic.parameters(),
+            lr = args.critic_lrate, alpha=0.97, eps=1e-6)  
+        
+        self.actor_params = list(actor.parameters())
+        self.critic_params = list(critic.parameters())
+        self.params = self.actor_params + self.critic_params
 
 
     def get_episode(self, epoch):
@@ -47,10 +54,11 @@ class Trainer(object):
             # recurrence over time
             if self.args.recurrent:
                 if self.args.rnn_type == 'LSTM' and t == 0:
-                    prev_hid = self.policy_net.init_hidden(batch_size=state.shape[0])
+                    prev_hid = self.actor.init_hidden(batch_size=state.shape[0])
 
                 x = [state, prev_hid]
-                action_out, value, prev_hid = self.policy_net(x, info)
+                action_out, value, prev_hid = self.actor(x, info)
+                hidden_state = prev_hid[0].clone().detach()
 
                 if (t + 1) % self.args.detach_gap == 0:
                     if self.args.rnn_type == 'LSTM':
@@ -59,7 +67,7 @@ class Trainer(object):
                         prev_hid = prev_hid.detach()
             else:
                 x = state
-                action_out, value = self.policy_net(x, info)
+                action_out = self.actor(x, info)
 
             action = select_action(self.args, action_out)
             action, actual = translate_action(self.args, self.env, action)
@@ -100,7 +108,7 @@ class Trainer(object):
             if should_display:
                 self.env.display()
 
-            trans = Transition(state, action, action_out, value, episode_mask, episode_mini_mask, next_state, reward, misc)
+            trans = Transition(state, hidden_state, action, action_out, episode_mask, episode_mini_mask, next_state, reward, misc)
             episode.append(trans)
             state = next_state
             if done:
@@ -119,76 +127,117 @@ class Trainer(object):
             if hasattr(self.args, 'enemy_comm') and self.args.enemy_comm:
                 stat['enemy_reward'] = stat.get('enemy_reward', 0) + reward[self.args.nfriendly:]
 
-
         if hasattr(self.env, 'get_stat'):
             merge_stat(self.env.get_stat(), stat)
         return (episode, stat)
-
-    def compute_grad(self, batch):
-        stat = dict()
+    
+    def update(self, batch):
+        # action space
         num_actions = self.args.num_actions
-        dim_actions = self.args.dim_actions
+        # number of action head
+        dim_actions = self.args.dim_actions        
 
-        n = self.args.nagents
+        n = self.nagents
         batch_size = len(batch.state)
-
-        rewards = torch.Tensor(batch.reward)
-        episode_masks = torch.Tensor(batch.episode_mask)
-        episode_mini_masks = torch.Tensor(batch.episode_mini_mask)
+        # size: batch_size * n * hid_size
+        hidden_state = torch.stack(batch.hidden_state, dim=0)
+        # size: batch_size * (n*hid_size)
+        hidden_state = hidden_state.view(batch_size, n*self.args.hid_size)
+        # size: batch_size * n
+        rewards = torch.Tensor(batch.state)
         actions = torch.Tensor(batch.action)
-        actions = actions.transpose(1, 2).view(-1, n, dim_actions)
-
-        # old_actions = torch.Tensor(np.concatenate(batch.action, 0))
-        # old_actions = old_actions.view(-1, n, dim_actions)
-        # print(old_actions == actions)
-
-        # can't do batch forward.
-        values = torch.cat(batch.value, dim=0)
-        action_out = list(zip(*batch.action_out))
-        action_out = [torch.cat(a, dim=0) for a in action_out]
-
+        # size: batch_size * n * dim_actions.  have been detached
+        actions = actions.transpose(1, 2).view(-1, n, dim_actions) 
+        # size: batch_size * n
+        episode_masks = torch.Tensor(batch.episode_mask)
+        # size: batch_size * n
+        episode_mini_masks = torch.Tensor(batch.episode_mini_mask)
+        # size: (batch_size*n)
         alive_masks = torch.Tensor(np.concatenate([item['alive_mask'] for item in batch.misc])).view(-1)
+        
+        ## update critic
+        self.critic_optimizer.zero_grad()
 
-        coop_returns = torch.Tensor(batch_size, n)
-        ncoop_returns = torch.Tensor(batch_size, n)
-        returns = torch.Tensor(batch_size, n)
-        deltas = torch.Tensor(batch_size, n)
+        # use one-hot actions as the input of the critic
+        # element of actions_onehot size: batch_size * n * num_actions[i]
+        actions_onehot = [torch.Tensor(batch_size, n, num_actions[i]) for i in range(dim_actions)]
+        for i in range(dim_actions):
+            actions_onehot[i].zero_()
+            actions_onehot[i].scatter_(2, actions[:,:,i].unsqueeze(dim=-1).long(), 1)
+            # size: batch_size * (n*num_actions[i])
+            actions_onehot[i] = actions_onehot[i].view(batch_size, n*num_actions[i])
+        # size: batch_size * (n*hid_size + n*sum(num_actions))
+        critic_in = torch.cat([hidden_state, torch.cat(actions_onehot, dim=1)], dim=1)
+            
+        # size: batch_size * 1
+        # Q(macro_hidden_state, (macro_action_head1, macro_action_head2, ...))
+        # the input size is fixed even if there can be dead agents
+        critic_out = self.critic(critic_in)
+        # target critic should use hidden states and actions from next time step
+        next_critic_in = critic_in[:-1, :].clone()
+        next_critic_out = self.target_critic(next_critic_in)
+        # pad 0 in the end
+        next_critic_out = torch.cat([next_critic_out, torch.zeros((1, 1))], dim=0)
+        # expand size of critic_out:
+        critic_out = critic_out.expand(batch_size, n)
+        next_critic_out = next_critic_out.expand(batch_size, n)
+        # use episode_mask to mark the episode as end, so they do not have next critic
+        # use episode_mini_mask to mark an agent just complete (dead), so it does not has next critic
+        # in tj env, if an agent will die in the next step, there will be no reward, and the value in \
+        # episode_mini_masks and alive masks will be 0
+        td_errors = rewards + self.args.gamma * next_critic_out * episode_masks * episode_mini_masks - critic_out
+        # mask the dead agents (in fact the agent is dead after taking action? so should mask next step?)
+        # size: batch_size * n
+        alive_masks = alive_masks.view(batch_size, n)
+        # pad at the start
+        if self.args.env_name == "traffic_junction":
+            alive_masks = torch.cat([torch.zeros(1, n), alive_masks[1:, :]], dim=0)
+        td_errors *= alive_masks
+        crtic_loss = td_errors.pow(2).sum() # divided by?
+        
+        # backward and update
+        critic_loss.backward()
+        for p in self.critic_params:
+            if p._grad is not None:
+                print(p.grad.data)
+                p._grad.data /= batch_size
+                print(p.grad.data)        
+        
+        self.critic_optimizer.step()
+        
+        
+        ## update target critic
+        for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
+            target_param.data.copy_(target_param.data * (1.0 - self.args.tau) + param.data * self.args.tau)  
+            
+            
+        ## update actor
         advantages = torch.Tensor(batch_size, n)
-        values = values.view(batch_size, n)
-
-        prev_coop_return = 0
-        prev_ncoop_return = 0
-        prev_value = 0
-        prev_advantage = 0
-
-        for i in reversed(range(rewards.size(0))):
-            coop_returns[i] = rewards[i] + self.args.gamma * prev_coop_return * episode_masks[i]
-            ncoop_returns[i] = rewards[i] + self.args.gamma * prev_ncoop_return * episode_masks[i] * episode_mini_masks[i]
-
-            prev_coop_return = coop_returns[i].clone()
-            prev_ncoop_return = ncoop_returns[i].clone()
-
-            returns[i] = (self.args.mean_ratio * coop_returns[i].mean()) \
-                        + ((1 - self.args.mean_ratio) * ncoop_returns[i])
-
-
-        for i in reversed(range(rewards.size(0))):
-            advantages[i] = returns[i] - values.data[i]
+        alive_masks = alive_masks.view(-1)
+        action_out = list(zip(*batch.action_out))
+        # length: dim_actions
+        # element size: batch_size * n * num_actions[i]
+        action_out = [torch.cat(a, dim=0) for a in action_out]
+        
+        returns = self.critic(critic_in)
+        returns = returns.expand(batch_size, n)
+        
+        # calculate counterfactual baseline
+        
+        
+        
+        
 
         if self.args.normalize_rewards:
             advantages = (advantages - advantages.mean()) / advantages.std()
 
-        if self.args.continuous:
-            action_means, action_log_stds, action_stds = action_out
-            log_prob = normal_log_density(actions, action_means, action_log_stds, action_stds)
-        else:
-            log_p_a = [action_out[i].view(-1, num_actions[i]) for i in range(dim_actions)]
-            actions = actions.contiguous().view(-1, dim_actions)
+        log_p_a = [action_out[i].view(-1, num_actions[i]) for i in range(dim_actions)]
+        actions = actions.contiguous().view(-1, dim_actions)
 
-            if self.args.advantages_per_action:
-                log_prob = multinomials_log_densities(actions, log_p_a)
-            else:
-                log_prob = multinomials_log_density(actions, log_p_a)
+        if self.args.advantages_per_action:
+            log_prob = multinomials_log_densities(actions, log_p_a)
+        else:
+            log_prob = multinomials_log_density(actions, log_p_a)
 
         if self.args.advantages_per_action:
             action_loss = -advantages.view(-1).unsqueeze(-1) * log_prob
@@ -199,28 +248,6 @@ class Trainer(object):
 
         action_loss = action_loss.sum()
         stat['action_loss'] = action_loss.item()
-
-        # value loss term
-        targets = returns
-        value_loss = (values - targets).pow(2).view(-1)
-        value_loss *= alive_masks
-        value_loss = value_loss.sum()
-
-        stat['value_loss'] = value_loss.item()
-        loss = action_loss + self.args.value_coeff * value_loss
-
-        if not self.args.continuous:
-            # entropy regularization term
-            entropy = 0
-            for i in range(len(log_p_a)):
-                entropy -= (log_p_a[i] * log_p_a[i].exp()).sum()
-            stat['entropy'] = entropy.item()
-            if self.args.entr > 0:
-                loss -= self.args.entr * entropy
-
-        loss.backward()
-
-        return stat
 
     def run_batch(self, epoch):
         batch = []
@@ -245,16 +272,19 @@ class Trainer(object):
         self.optimizer.zero_grad()
 
         s = self.compute_grad(batch)
-        merge_stat(s, stat)
-        for p in self.params:
+        for p in self.actor_params:
             if p._grad is not None:
+                print(p.grad.data)
                 p._grad.data /= stat['num_steps']
+                print(p.grad.data)
         self.optimizer.step()
 
         return stat
 
     def state_dict(self):
-        return self.optimizer.state_dict()
+        return {'actor_optimizer': self.actor_optimizer.state_dict(),
+                'critic_optimizer': self.critic_optimizer.state_dict()}
 
     def load_state_dict(self, state):
-        self.optimizer.load_state_dict(state)
+        self.actor_optimizer.load_state_dict(state['actor_optimizer'])
+        self.critic_optimizer.load_state_dict(state['critic_optimizer'])

@@ -12,7 +12,8 @@ python -u main.py \
   --epoch_size 10 \
   --hid_size 128 \
   --detach_gap 10 \
-  --lrate 0.001 \
+  --critic_lrate 0.001 \
+  --actor_lrate 0.001 \
   --ic3net \
   --tarcomm \
   --recurrent \

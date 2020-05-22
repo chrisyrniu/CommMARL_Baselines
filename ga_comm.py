@@ -10,9 +10,10 @@ from models import MLP
 from action_utils import select_action, translate_action
 
 class GACommNetMLP(nn.Module):
-    def __init__(self, args, num_inputs):
+    def __init__(self, args):
         super(GACommNetMLP, self).__init__()
         self.args = args
+        self.num_inputs = args.num_inputs
         self.nagents = args.nagents
         self.hid_size = args.hid_size
         self.comm_passes = args.comm_passes
@@ -37,7 +38,7 @@ class GACommNetMLP(nn.Module):
             self.comm_mask = torch.ones(self.nagents, self.nagents) \
                             - torch.eye(self.nagents, self.nagents)
 
-        self.encoder = nn.Linear(num_inputs, args.hid_size)
+        self.encoder = nn.Linear(self.num_inputs, args.hid_size)
 
         if args.recurrent:
             self.hidd_encoder = nn.Linear(args.hid_size, args.hid_size)
@@ -73,13 +74,6 @@ class GACommNetMLP(nn.Module):
             for i in range(self.comm_passes):
                 self.C_modules[i].weight.data.zero_()
         self.tanh = nn.Tanh()
-
-        # print(self.C)
-        # self.C.weight.data.zero_()
-        # Init weights for linear layers
-        # self.apply(self.init_weights)
-
-        self.value_head = nn.Linear(self.hid_size, 1)
 
         # hard attention layers to form the graph 
         self.lstm = nn.LSTM(args.hid_size * 2, args.hid_size * 2, bidirectional=True)
@@ -141,7 +135,6 @@ class GACommNetMLP(nn.Module):
                 comm_out {tensor}: Next communication tensor
                 action_data: Data needed for taking next action (Discrete values in
                 case of discrete, mean and std in case of continuous)
-                v: value head
         """
 
         # if self.args.env_name == 'starcraft':
@@ -222,7 +215,6 @@ class GACommNetMLP(nn.Module):
             comm = comm.view(batch_size, n, self.hid_size)
             comm = comm * agent_mask
 
-        value_head = self.value_head(hidden_state)
         h = hidden_state.view(batch_size, n, self.hid_size)
 
         if self.continuous:
@@ -236,9 +228,9 @@ class GACommNetMLP(nn.Module):
             action = [F.log_softmax(head(torch.cat([h, comm], dim=-1)), dim=-1) for head in self.heads]
 
         if self.args.recurrent:
-            return action, value_head, (hidden_state.clone(), cell_state.clone())
+            return action, (hidden_state.clone(), cell_state.clone())
         else:
-            return action, value_head
+            return action
 
     def init_weights(self, m):
         if type(m) == nn.Linear:

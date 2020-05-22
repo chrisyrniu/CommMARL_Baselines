@@ -25,17 +25,26 @@ class MultiProcessWorker(mp.Process):
                 return
             elif task == 'run_batch':
                 batch, stat = self.trainer.run_batch(epoch)
-                self.trainer.optimizer.zero_grad()
-                s = self.trainer.compute_grad(batch)
+                self.trainer.critic_optimizer.zero_grad()
+                s = self.trainer.comp_critic_grad(batch)
                 merge_stat(s, stat)
                 self.comm.send(stat)
-            elif task == 'send_grads':
-                grads = []
-                for p in self.trainer.params:
+            elif task == 'send_critic_grads':
+                critic_grads = []
+                for p in self.trainer.critic_params:
                     if p._grad is not None:
-                        grads.append(p._grad.data)
-
-                self.comm.send(grads)
+                        critic_grads.append(p._grad.data)
+                self.comm.send(critic_grads)
+            elif task == 'comp_actor':
+                self.trainer.actor_optimizer.zero_grad()
+                s = self.trainer.comp_actor_grad(batch) 
+                self.comm.send(s)
+            elif task == 'send_actor_grads':
+                actor_grads = []
+                for p in self.trainer.actor_params:
+                    if p._grad is not None:
+                        actor_grads.append(p._grad.data)
+                self.comm.send(actor_grads)
 
 
 class MultiProcessTrainer(object):
@@ -49,8 +58,10 @@ class MultiProcessTrainer(object):
             self.comms.append(comm)
             worker = MultiProcessWorker(i, trainer_maker, comm_remote, seed=args.seed)
             worker.start()
-        self.grads = None
-        self.worker_grads = None
+        self.critic_grads = None
+        self.actor_grads = None
+        self.worker_critic_grads = None
+        self.worker_actor_grads = None
         self.is_random = args.random
 
     def quit(self):
@@ -59,17 +70,17 @@ class MultiProcessTrainer(object):
 
     def obtain_grad_pointers(self):
         # only need perform this once
-        if self.grads is None:
-            self.grads = []
-            for p in self.trainer.params:
+        if self.critic_grads is None:
+            self.critic_grads = []
+            for p in self.trainer.critic_params:
                 if p._grad is not None:
-                    self.grads.append(p._grad.data)
+                    self.critic_grads.append(p._grad.data)
+        if self.actor_grads is None:
+            self.actor_grads = []
+            for p in self.trainer.actor_params:
+                if p._grad is not None:
+                    self.actor_grads.append(p._grad.data)
 
-        if self.worker_grads is None:
-            self.worker_grads = []
-            for comm in self.comms:
-                comm.send('send_grads')
-                self.worker_grads.append(comm.recv())
 
     def train_batch(self, epoch):
         # run workers in parallel
@@ -78,8 +89,8 @@ class MultiProcessTrainer(object):
 
         # run its own trainer
         batch, stat = self.trainer.run_batch(epoch)
-        self.trainer.optimizer.zero_grad()
-        s = self.trainer.compute_grad(batch)
+        self.trainer.critic_optimizer.zero_grad()
+        s = self.trainer.comp_critic_grad(batch)
         merge_stat(s, stat)
 
         # check if workers are finished
@@ -87,14 +98,47 @@ class MultiProcessTrainer(object):
             s = comm.recv()
             merge_stat(s, stat)
 
-        # add gradients of workers
+        # add gradients
         self.obtain_grad_pointers()
-        for i in range(len(self.grads)):
-            for g in self.worker_grads:
-                self.grads[i] += g[i]
-            self.grads[i] /= stat['num_steps']
+        # add critic gradients of workers
+        if self.worker_critic_grads is None:
+            self.worker_critic_grads = []
+            for comm in self.comms:
+                comm.send('send_critic_grads')
+                self.worker_critic_grads.append(comm.recv())
+                
+        for i in range(len(self.critic_grads)):
+            for g in self.worker_critic_grads:
+                self.critic_grads[i] += g[i]
+            self.critic_grads[i] /= stat['num_steps']
+        self.trainer.critic_optimizer.step()
+            
+        self.trainer.update_target_critic()
+        
+        for comm in self.comms:
+            comm.send(['comp_actor', epoch])
+        
+        self.trainer.actor_optimizer.zero_grad()
+        s = self.trainer.comp_actor_grad(batch)
+        merge_stat(s, stat)
+        
+        for comm in self.comms:
+            s = comm.recv()
+            merge_stat(s, stat)
 
-        self.trainer.optimizer.step()
+        # add actor gradients of workers
+        if self.worker_actor_grads is None:
+            self.worker_actor_grads = []
+            for comm in self.comms:
+                comm.send('send_actor_grads')
+                self.worker_actor_grads.append(comm.recv())
+                
+        for i in range(len(self.actor_grads)):
+            for g in self.worker_actor_grads:
+                self.actor_grads[i] += g[i]
+            self.actor_grads[i] /= stat['num_steps']
+        self.trainer.actor_optimizer.step()
+        
         return stat
 
     def state_dict(self):

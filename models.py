@@ -6,10 +6,11 @@ import torch.nn.functional as F
 
 
 class MLP(nn.Module):
-    def __init__(self, args, num_inputs):
+    def __init__(self, args):
         super(MLP, self).__init__()
         self.args = args
-        self.affine1 = nn.Linear(num_inputs, args.hid_size)
+        self.num_inputs = args.num_inputs
+        self.affine1 = nn.Linear(self.num_inputs, args.hid_size)
         self.affine2 = nn.Linear(args.hid_size, args.hid_size)
         self.continuous = args.continuous
         if self.continuous:
@@ -35,7 +36,7 @@ class MLP(nn.Module):
 
 
 class Random(nn.Module):
-    def __init__(self, args, num_inputs):
+    def __init__(self, args):
         super(Random, self).__init__()
         self.naction_heads = args.naction_heads
 
@@ -57,8 +58,8 @@ class Random(nn.Module):
 
 
 class RNN(MLP):
-    def __init__(self, args, num_inputs):
-        super(RNN, self).__init__(args, num_inputs)
+    def __init__(self, args):
+        super(RNN, self).__init__(args)
         self.nagents = self.args.nagents
         self.hid_size = self.args.hid_size
         if self.args.rnn_type == 'LSTM':

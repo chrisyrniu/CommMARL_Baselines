@@ -1,4 +1,5 @@
 #!/bin/bash
+export OMP_NUM_THREADS=1
 
 python -u main.py \
   --env_name traffic_junction \
@@ -9,7 +10,7 @@ python -u main.py \
   --add_rate_max 0.3 \
   --difficulty easy \
   --vision 0 \
-  --nprocesses 4 \
+  --nprocesses 1 \
   --num_epochs 1000 \
   --epoch_size 10 \
   --hid_size 128 \

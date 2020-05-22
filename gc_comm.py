@@ -11,9 +11,10 @@ from models import MLP
 from action_utils import select_action, translate_action
 
 class GCCommNetMLP(nn.Module):
-    def __init__(self, args, num_inputs):
+    def __init__(self, args):
         super(GCCommNetMLP, self).__init__()
         self.args = args
+        self.num_inputs = args.num_inputs
         self.nagents = args.nagents
         self.hid_size = args.hid_size
         self.comm_passes = args.comm_passes
@@ -44,11 +45,8 @@ class GCCommNetMLP(nn.Module):
         # between last and first dim, num_agents dimension will be covered.
         # The network below is function r in the paper for encoding
         # initial environment stage
-        self.encoder = nn.Linear(num_inputs, args.hid_size)
+        self.encoder = nn.Linear(self.num_inputs, args.hid_size)
 
-        # if self.args.env_name == 'starcraft':
-        #     self.state_encoder = nn.Linear(num_inputs, num_inputs)
-        #     self.encoder = nn.Linear(num_inputs * 2, args.hid_size)
         if args.recurrent:
             self.hidd_encoder = nn.Linear(args.hid_size, args.hid_size)
 
@@ -83,13 +81,6 @@ class GCCommNetMLP(nn.Module):
             for i in range(self.comm_passes):
                 self.C_modules[i].weight.data.zero_()
         self.tanh = nn.Tanh()
-
-        # print(self.C)
-        # self.C.weight.data.zero_()
-        # Init weights for linear layers
-        # self.apply(self.init_weights)
-
-        self.value_head = nn.Linear(self.hid_size, 1)
 
 
     def get_agent_mask(self, batch_size, info):
@@ -146,7 +137,6 @@ class GCCommNetMLP(nn.Module):
                 comm_out {tensor}: Next communication tensor
                 action_data: Data needed for taking next action (Discrete values in
                 case of discrete, mean and std in case of continuous)
-                v: value head
         """
 
         # if self.args.env_name == 'starcraft':
@@ -221,9 +211,6 @@ class GCCommNetMLP(nn.Module):
                 hidden_state = sum([x, self.f_modules[i](hidden_state), c])
                 hidden_state = self.tanh(hidden_state)
 
-        # v = torch.stack([self.value_head(hidden_state[:, i, :]) for i in range(n)])
-        # v = v.view(hidden_state.size(0), n, -1)
-        value_head = self.value_head(hidden_state)
         h = hidden_state.view(batch_size, n, self.hid_size)
 
         if self.continuous:
@@ -237,9 +224,9 @@ class GCCommNetMLP(nn.Module):
             action = [F.log_softmax(head(h), dim=-1) for head in self.heads]
 
         if self.args.recurrent:
-            return action, value_head, (hidden_state.clone(), cell_state.clone())
+            return action, (hidden_state.clone(), cell_state.clone())
         else:
-            return action, value_head
+            return action
 
     def init_weights(self, m):
         if type(m) == nn.Linear:

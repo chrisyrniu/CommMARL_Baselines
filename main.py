@@ -14,11 +14,13 @@ from comm import CommNetMLP
 from gc_comm import GCCommNetMLP
 from ga_comm import GACommNetMLP
 from tar_comm import TarCommNetMLP
+from critic import Critic
 from utils import *
 from action_utils import parse_action_args
 from trainer import Trainer
 from multi_processing import MultiProcessTrainer
 import gym
+import copy
 
 gym.logger.set_level(40)
 
@@ -50,14 +52,16 @@ parser.add_argument('--recurrent', action='store_true', default=False,
 # optimization
 parser.add_argument('--gamma', type=float, default=1.0,
                     help='discount factor')
-parser.add_argument('--tau', type=float, default=1.0,
-                    help='gae (remove?)')
+parser.add_argument('--tau', type=float, default=0.1,
+                    help='rate to update target critic')
 parser.add_argument('--seed', type=int, default=-1,
                     help='random seed. Pass -1 for random seed') # TODO: works in thread?
 parser.add_argument('--normalize_rewards', action='store_true', default=False,
                     help='normalize rewards in each batch')
-parser.add_argument('--lrate', type=float, default=0.001,
-                    help='learning rate')
+parser.add_argument('--actor_lrate', type=float, default=0.001,
+                    help='actor learning rate')
+parser.add_argument('--critic_lrate', type=float, default=0.001,
+                    help='critic learning rate')
 parser.add_argument('--entr', type=float, default=0,
                     help='entropy regularization coeff')
 parser.add_argument('--value_coeff', type=float, default=0.01,
@@ -184,29 +188,33 @@ torch.manual_seed(args.seed)
 print(args)
 
 if args.gacomm:
-    policy_net = GACommNetMLP(args, num_inputs)
+    actor = GACommNetMLP(args)
 elif args.commnet:
     if args.gccomm:
-        policy_net = GCCommNetMLP(args, num_inputs)
+        actor = GCCommNetMLP(args)
     elif args.tarcomm:
-        policy_net = TarCommNetMLP(args, num_inputs)
+        actor = TarCommNetMLP(args)
     else:
-        policy_net = CommNetMLP(args, num_inputs)
+        actor = CommNetMLP(args)
 elif args.random:
-    policy_net = Random(args, num_inputs)
+    actor = Random(args)
 elif args.recurrent:
-    policy_net = RNN(args, num_inputs)
+    actor = RNN(args)
 else:
-    policy_net = MLP(args, num_inputs)
+    actor = MLP(args)
 
+critic = Critic(args) 
+target_critic = copy.deepcopy(critic)
+    
 if not args.display:
-    display_models([policy_net])
+    display_models([actor, critic, target_critic])
 
 # share parameters among threads, but not gradients
-for p in policy_net.parameters():
-    p.data.share_memory_()
+for model in [actor, critic, target_critic]:
+    for p in model.parameters():
+        p.data.share_memory_()
 
-disp_trainer = Trainer(args, policy_net, data.init(args.env_name, args, False))
+disp_trainer = Trainer(args, actor, critic, target_critic, data.init(args.env_name, args, False))
 disp_trainer.display = True
 def disp():
     x = disp_trainer.get_episode()
@@ -214,9 +222,9 @@ def disp():
 if args.env_name == 'grf':
     args.render = render
 if args.nprocesses > 1:
-    trainer = MultiProcessTrainer(args, lambda: Trainer(args, policy_net, data.init(args.env_name, args)))
+    trainer = MultiProcessTrainer(args, lambda: Trainer(args, actor, critic, target_critic, data.init(args.env_name, args)))
 else:
-    trainer = Trainer(args, policy_net, data.init(args.env_name, args))
+    trainer = Trainer(args, actor, critic, target_critic, data.init(args.env_name, args))
 
 log = dict()
 log['epoch'] = LogField(list(), False, None, None)
@@ -227,13 +235,14 @@ log['steps_taken'] = LogField(list(), True, 'epoch', 'num_episodes')
 log['add_rate'] = LogField(list(), True, 'epoch', 'num_episodes')
 log['comm_action'] = LogField(list(), True, 'epoch', 'num_steps')
 log['enemy_comm'] = LogField(list(), True, 'epoch', 'num_steps')
-log['value_loss'] = LogField(list(), True, 'epoch', 'num_steps')
-log['action_loss'] = LogField(list(), True, 'epoch', 'num_steps')
+log['critic_loss'] = LogField(list(), True, 'epoch', 'num_steps')
+log['actor_loss'] = LogField(list(), True, 'epoch', 'num_steps')
 log['entropy'] = LogField(list(), True, 'epoch', 'num_steps')
 
 if args.plot:
     vis = visdom.Visdom(env=args.plot_env, port=args.plot_port)
 
+# set up save dir
 if args.gacomm:
     model_dir = Path('./saved') / args.env_name / 'gacomm'
 elif args.gccomm:
@@ -330,7 +339,9 @@ def run(num_epochs):
 
 def save(final, episode=0): 
     d = dict()
-    d['policy_net'] = policy_net.state_dict()
+    d['actor'] = actor.state_dict()
+    d['critic'] = critic.state_dict()
+    d['target_critic'] = target_critic.state_dict()
     d['log'] = log
     d['trainer'] = trainer.state_dict()
     if final:
@@ -340,8 +351,9 @@ def save(final, episode=0):
 
 def load(path):
     d = torch.load(path)
-    # log.clear()
-    policy_net.load_state_dict(d['policy_net'])
+    actor.load_state_dict(d['actor'])
+    critic.load_state_dict(d['critic'])
+    target_critic.load_state_dict(d['target_critic'])
     log.update(d['log'])
     trainer.load_state_dict(d['trainer'])
 

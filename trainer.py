@@ -1,4 +1,4 @@
- from collections import namedtuple
+from collections import namedtuple
 from inspect import getargspec
 import numpy as np
 import torch
@@ -6,6 +6,7 @@ from torch import optim
 import torch.nn as nn
 from utils import *
 from action_utils import *
+import itertools
 
 Transition = namedtuple('Transition', ('state', 'hidden_state', 'action', 'action_out', 'episode_mask', 'episode_mini_mask', 'next_state', 'reward', 'misc'))
 
@@ -57,7 +58,7 @@ class Trainer(object):
                     prev_hid = self.actor.init_hidden(batch_size=state.shape[0])
 
                 x = [state, prev_hid]
-                action_out, value, prev_hid = self.actor(x, info)
+                action_out, prev_hid = self.actor(x, info)
                 hidden_state = prev_hid[0].clone().detach()
 
                 if (t + 1) % self.args.detach_gap == 0:
@@ -131,20 +132,21 @@ class Trainer(object):
             merge_stat(self.env.get_stat(), stat)
         return (episode, stat)
     
-    def update(self, batch):
+    def comp_critic_grad(self, batch):
+        stat = dict()
         # action space
         num_actions = self.args.num_actions
         # number of action head
         dim_actions = self.args.dim_actions        
 
-        n = self.nagents
+        n = self.args.nagents
         batch_size = len(batch.state)
         # size: batch_size * n * hid_size
         hidden_state = torch.stack(batch.hidden_state, dim=0)
         # size: batch_size * (n*hid_size)
         hidden_state = hidden_state.view(batch_size, n*self.args.hid_size)
         # size: batch_size * n
-        rewards = torch.Tensor(batch.state)
+        rewards = torch.Tensor(batch.reward)
         actions = torch.Tensor(batch.action)
         # size: batch_size * n * dim_actions.  have been detached
         actions = actions.transpose(1, 2).view(-1, n, dim_actions) 
@@ -155,27 +157,15 @@ class Trainer(object):
         # size: (batch_size*n)
         alive_masks = torch.Tensor(np.concatenate([item['alive_mask'] for item in batch.misc])).view(-1)
         
-        ## update critic
-        self.critic_optimizer.zero_grad()
-
-        # use one-hot actions as the input of the critic
-        # element of actions_onehot size: batch_size * n * num_actions[i]
-        actions_onehot = [torch.Tensor(batch_size, n, num_actions[i]) for i in range(dim_actions)]
-        for i in range(dim_actions):
-            actions_onehot[i].zero_()
-            actions_onehot[i].scatter_(2, actions[:,:,i].unsqueeze(dim=-1).long(), 1)
-            # size: batch_size * (n*num_actions[i])
-            actions_onehot[i] = actions_onehot[i].view(batch_size, n*num_actions[i])
-        # size: batch_size * (n*hid_size + n*sum(num_actions))
-        critic_in = torch.cat([hidden_state, torch.cat(actions_onehot, dim=1)], dim=1)
+        # initialize?
+        # use reversed?
             
         # size: batch_size * 1
         # Q(macro_hidden_state, (macro_action_head1, macro_action_head2, ...))
         # the input size is fixed even if there can be dead agents
-        critic_out = self.critic(critic_in)
+        critic_out = self.critic(hidden_state, actions)
         # target critic should use hidden states and actions from next time step
-        next_critic_in = critic_in[:-1, :].clone()
-        next_critic_out = self.target_critic(next_critic_in)
+        next_critic_out = self.target_critic(hidden_state, actions)[1:, :]
         # pad 0 in the end
         next_critic_out = torch.cat([next_critic_out, torch.zeros((1, 1))], dim=0)
         # expand size of critic_out:
@@ -191,27 +181,47 @@ class Trainer(object):
         alive_masks = alive_masks.view(batch_size, n)
         # pad at the start
         if self.args.env_name == "traffic_junction":
-            alive_masks = torch.cat([torch.zeros(1, n), alive_masks[1:, :]], dim=0)
+            alive_masks = torch.cat([torch.zeros(1, n), alive_masks[:-1, :]], dim=0)
         td_errors *= alive_masks
-        crtic_loss = td_errors.pow(2).sum() # divided by?
+        critic_loss = td_errors.pow(2).sum() # divided by?
+        stat['critic_loss'] = critic_loss.item()
         
-        # backward and update
-        critic_loss.backward()
-        for p in self.critic_params:
-            if p._grad is not None:
-                print(p.grad.data)
-                p._grad.data /= batch_size
-                print(p.grad.data)        
+        # backward
+        critic_loss.backward() 
         
-        self.critic_optimizer.step()
+        return stat
         
-        
-        ## update target critic
-        for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
-            target_param.data.copy_(target_param.data * (1.0 - self.args.tau) + param.data * self.args.tau)  
+    def comp_actor_grad(self, batch):
+        stat = dict()
+        # action space
+        num_actions = self.args.num_actions
+        # number of action head
+        dim_actions = self.args.dim_actions        
+
+        n = self.args.nagents
+        batch_size = len(batch.state)
+        # size: batch_size * n * hid_size
+        hidden_state = torch.stack(batch.hidden_state, dim=0)
+        # size: batch_size * (n*hid_size)
+        hidden_state = hidden_state.view(batch_size, n*self.args.hid_size)
+        # size: batch_size * n
+        rewards = torch.Tensor(batch.reward)
+        actions = torch.Tensor(batch.action)
+        # size: batch_size * n * dim_actions.  have been detached
+        actions = actions.transpose(1, 2).view(-1, n, dim_actions) 
+        # size: batch_size * n
+        episode_masks = torch.Tensor(batch.episode_mask)
+        # size: batch_size * n
+        episode_mini_masks = torch.Tensor(batch.episode_mini_mask)
+        # size: (batch_size*n)
+        alive_masks = torch.Tensor(np.concatenate([item['alive_mask'] for item in batch.misc])).view(-1)
+        # mask the dead agents (in fact the agent is dead after taking action? so should mask next step?)
+        # size: batch_size * n
+        alive_masks = alive_masks.view(batch_size, n)
+        # pad at the start
+        if self.args.env_name == "traffic_junction":
+            alive_masks = torch.cat([torch.zeros(1, n), alive_masks[1:, :]], dim=0)
             
-            
-        ## update actor
         advantages = torch.Tensor(batch_size, n)
         alive_masks = alive_masks.view(-1)
         action_out = list(zip(*batch.action_out))
@@ -219,35 +229,85 @@ class Trainer(object):
         # element size: batch_size * n * num_actions[i]
         action_out = [torch.cat(a, dim=0) for a in action_out]
         
-        returns = self.critic(critic_in)
+        returns = self.critic(hidden_state, actions).detach()
         returns = returns.expand(batch_size, n)
         
-        # calculate counterfactual baseline
-        
-        
-        
-        
+        ## calculate counterfactual baseline
+        action_index_list = [[j for j in range(num_actions[i])]  for i in range(dim_actions)]
+        # a list of all the possible combinations of differnet action heads 
+        action_index_combo = list(itertools.product(*action_index_list))
 
+        baseline = []
+        for agent_idx in range(n):
+            # element size: batch_size * num_actions[i]
+            log_p_agent = [action_out[i][:, agent_idx, :].view(-1, num_actions[i]) for i in range(dim_actions)]
+            # print(log_p_agent[1].size())
+            agent_baseline = []
+            # prob = []
+            for action_combo in action_index_combo:
+                # size: 1 * dim_actions
+                action_combo = torch.Tensor(action_combo).view(-1, dim_actions)
+                action_marginalized = actions.clone()
+                action_marginalized[:, agent_idx, :] = action_combo
+                # size: batch_size * 1
+                critic_marginalized = self.critic(hidden_state, action_marginalized).detach()
+                # size: batch_size * dim_actions
+                agent_actions = action_marginalized[:, agent_idx, :]
+                # size: batch_size * 1
+                log_prob_agent = multinomials_log_density(agent_actions, log_p_agent)
+                
+                agent_baseline.append(critic_marginalized * torch.exp(log_prob_agent))
+                # prob.append(torch.exp(log_prob_agent))
+
+            # size: batch_size * 1
+            agent_baseline = torch.cat(agent_baseline, dim=1).sum(dim=1).unsqueeze(dim=-1)
+            # prob = torch.cat(prob, dim=1).sum(dim=1)
+            # print(prob)  # the element here should be one 
+            baseline.append(agent_baseline)
+
+        # size: batch_size * n
+        baseline = torch.cat(baseline, dim=1)    
+        advantages = returns - baseline
+        
         if self.args.normalize_rewards:
             advantages = (advantages - advantages.mean()) / advantages.std()
 
+        # element size: (batch_size*n) * num_actions[i]
         log_p_a = [action_out[i].view(-1, num_actions[i]) for i in range(dim_actions)]
+        # size: (batch_size*n) * dim_actions
         actions = actions.contiguous().view(-1, dim_actions)
 
         if self.args.advantages_per_action:
+            # size: (batch_size*n) * dim_actions
             log_prob = multinomials_log_densities(actions, log_p_a)
-        else:
+            # the log prob of each action head is multiplied by the advantage
+            actor_loss = -advantages.view(-1).unsqueeze(-1) * log_prob
+            actor_loss *= alive_masks.unsqueeze(-1)
+        else: # any difference between this and the advantages_per_action after actor_loss.sum()?
+            # size: (batch_size*n) * 1
             log_prob = multinomials_log_density(actions, log_p_a)
+            actor_loss = -advantages.view(-1) * log_prob.squeeze()
+            actor_loss *= alive_masks
 
-        if self.args.advantages_per_action:
-            action_loss = -advantages.view(-1).unsqueeze(-1) * log_prob
-            action_loss *= alive_masks.unsqueeze(-1)
-        else:
-            action_loss = -advantages.view(-1) * log_prob.squeeze()
-            action_loss *= alive_masks
-
-        action_loss = action_loss.sum()
-        stat['action_loss'] = action_loss.item()
+        actor_loss = actor_loss.sum()
+        stat['actor_loss'] = actor_loss.item()
+        
+        if not self.args.continuous:
+            # entropy regularization term
+            entropy = 0
+            for i in range(len(log_p_a)):
+                entropy -= (log_p_a[i] * log_p_a[i].exp()).sum()
+            stat['entropy'] = entropy.item()
+            if self.args.entr > 0:
+                actor_loss -= self.args.entr * entropy
+        
+        actor_loss.backward()
+        
+        return stat
+        
+    def update_target_critic(self):
+        for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
+            target_param.data.copy_(target_param.data * (1.0 - self.args.tau) + param.data * self.args.tau) 
 
     def run_batch(self, epoch):
         batch = []
@@ -269,15 +329,25 @@ class Trainer(object):
     # only used when nprocesses=1
     def train_batch(self, epoch):
         batch, stat = self.run_batch(epoch)
-        self.optimizer.zero_grad()
-
-        s = self.compute_grad(batch)
+        self.critic_optimizer.zero_grad()
+        s = self.comp_critic_grad(batch)
+        merge_stat(s, stat)
+        for p in self.critic_params:
+            if p._grad is not None:
+#                 print(p._grad.data)
+                p._grad.data /= stat['num_steps']
+        self.critic_optimizer.step()
+        
+        self.update_target_critic()
+        
+        self.actor_optimizer.zero_grad()
+        s = self.comp_actor_grad(batch)
+        merge_stat(s, stat)
         for p in self.actor_params:
             if p._grad is not None:
-                print(p.grad.data)
+#                 print(p._grad.data)
                 p._grad.data /= stat['num_steps']
-                print(p.grad.data)
-        self.optimizer.step()
+        self.actor_optimizer.step()
 
         return stat
 

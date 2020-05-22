@@ -112,8 +112,6 @@ class MultiProcessTrainer(object):
                 self.critic_grads[i] += g[i]
             self.critic_grads[i] /= stat['num_steps']
         self.trainer.critic_optimizer.step()
-            
-        self.trainer.update_target_critic()
         
         for comm in self.comms:
             comm.send(['comp_actor', epoch])

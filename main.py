@@ -52,8 +52,8 @@ parser.add_argument('--recurrent', action='store_true', default=False,
 # optimization
 parser.add_argument('--gamma', type=float, default=1.0,
                     help='discount factor')
-parser.add_argument('--tau', type=float, default=0.1,
-                    help='rate to update target critic')
+# parser.add_argument('--tau', type=float, default=0.1,
+#                     help='rate to update target critic')
 parser.add_argument('--seed', type=int, default=-1,
                     help='random seed. Pass -1 for random seed') # TODO: works in thread?
 parser.add_argument('--normalize_rewards', action='store_true', default=False,
@@ -204,17 +204,16 @@ else:
     actor = MLP(args)
 
 critic = Critic(args) 
-target_critic = copy.deepcopy(critic)
     
 if not args.display:
-    display_models([actor, critic, target_critic])
+    display_models([actor, critic])
 
 # share parameters among threads, but not gradients
-for model in [actor, critic, target_critic]:
+for model in [actor, critic]:
     for p in model.parameters():
         p.data.share_memory_()
 
-disp_trainer = Trainer(args, actor, critic, target_critic, data.init(args.env_name, args, False))
+disp_trainer = Trainer(args, actor, critic, data.init(args.env_name, args, False))
 disp_trainer.display = True
 def disp():
     x = disp_trainer.get_episode()
@@ -222,9 +221,9 @@ def disp():
 if args.env_name == 'grf':
     args.render = render
 if args.nprocesses > 1:
-    trainer = MultiProcessTrainer(args, lambda: Trainer(args, actor, critic, target_critic, data.init(args.env_name, args)))
+    trainer = MultiProcessTrainer(args, lambda: Trainer(args, actor, critic, data.init(args.env_name, args)))
 else:
-    trainer = Trainer(args, actor, critic, target_critic, data.init(args.env_name, args))
+    trainer = Trainer(args, actor, critic, data.init(args.env_name, args))
 
 log = dict()
 log['epoch'] = LogField(list(), False, None, None)
@@ -341,7 +340,6 @@ def save(final, episode=0):
     d = dict()
     d['actor'] = actor.state_dict()
     d['critic'] = critic.state_dict()
-    d['target_critic'] = target_critic.state_dict()
     d['log'] = log
     d['trainer'] = trainer.state_dict()
     if final:
@@ -353,7 +351,6 @@ def load(path):
     d = torch.load(path)
     actor.load_state_dict(d['actor'])
     critic.load_state_dict(d['critic'])
-    target_critic.load_state_dict(d['target_critic'])
     log.update(d['log'])
     trainer.load_state_dict(d['trainer'])
 

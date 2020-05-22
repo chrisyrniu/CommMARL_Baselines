@@ -12,11 +12,10 @@ Transition = namedtuple('Transition', ('state', 'hidden_state', 'action', 'actio
 
 
 class Trainer(object):
-    def __init__(self, args, actor, critic, target_critic, env):
+    def __init__(self, args, actor, critic, env):
         self.args = args
         self.actor = actor
         self.critic = critic
-        self.target_critic = target_critic
         self.env = env
         self.display = False
         self.last_step = False
@@ -164,26 +163,37 @@ class Trainer(object):
         # Q(macro_hidden_state, (macro_action_head1, macro_action_head2, ...))
         # the input size is fixed even if there can be dead agents
         critic_out = self.critic(hidden_state, actions)
-        # target critic should use hidden states and actions from next time step
-        next_critic_out = self.target_critic(hidden_state, actions)[1:, :]
-        # pad 0 in the end
-        next_critic_out = torch.cat([next_critic_out, torch.zeros((1, 1))], dim=0)
         # expand size of critic_out:
         critic_out = critic_out.expand(batch_size, n)
-        next_critic_out = next_critic_out.expand(batch_size, n)
-        # use episode_mask to mark the episode as end, so they do not have next critic
-        # use episode_mini_mask to mark an agent just complete (dead), so it does not has next critic
-        # in tj env, if an agent will die in the next step, there will be no reward, and the value in \
-        # episode_mini_masks and alive masks will be 0
-        td_errors = rewards + self.args.gamma * next_critic_out * episode_masks * episode_mini_masks - critic_out
+
+        
         # mask the dead agents (in fact the agent is dead after taking action? so should mask next step?)
         # size: batch_size * n
         alive_masks = alive_masks.view(batch_size, n)
         # pad at the start
         if self.args.env_name == "traffic_junction":
             alive_masks = torch.cat([torch.zeros(1, n), alive_masks[:-1, :]], dim=0)
-        td_errors *= alive_masks
-        critic_loss = td_errors.pow(2).sum() # divided by?
+            
+            
+        coop_returns = torch.Tensor(batch_size, n)
+        ncoop_returns = torch.Tensor(batch_size, n)
+        returns = torch.Tensor(batch_size, n)
+        prev_coop_return = 0
+        prev_ncoop_return = 0
+        
+        for i in reversed(range(rewards.size(0))):
+            coop_returns[i] = rewards[i] + self.args.gamma * prev_coop_return * episode_masks[i]
+            ncoop_returns[i] = rewards[i] + self.args.gamma * prev_ncoop_return * episode_masks[i] * episode_mini_masks[i]
+
+            prev_coop_return = coop_returns[i].clone()
+            prev_ncoop_return = ncoop_returns[i].clone()
+
+            returns[i] = (self.args.mean_ratio * coop_returns[i].mean()) \
+                        + ((1 - self.args.mean_ratio) * ncoop_returns[i])
+        
+        critic_loss = (returns - critic_out).pow(2) # divided by?
+        critic_loss *= alive_masks
+        critic_loss = critic_loss.sum()
         stat['critic_loss'] = critic_loss.item()
         
         # backward
@@ -304,10 +314,6 @@ class Trainer(object):
         actor_loss.backward()
         
         return stat
-        
-    def update_target_critic(self):
-        for target_param, param in zip(self.target_critic.parameters(), self.critic.parameters()):
-            target_param.data.copy_(target_param.data * (1.0 - self.args.tau) + param.data * self.args.tau) 
 
     def run_batch(self, epoch):
         batch = []
@@ -337,8 +343,6 @@ class Trainer(object):
 #                 print(p._grad.data)
                 p._grad.data /= stat['num_steps']
         self.critic_optimizer.step()
-        
-        self.update_target_critic()
         
         self.actor_optimizer.zero_grad()
         s = self.comp_actor_grad(batch)

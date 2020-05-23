@@ -13,6 +13,7 @@ from models import *
 from comm import CommNetMLP
 from gc_comm import GCCommNetMLP
 from ga_comm import GACommNetMLP
+from gat_comm import GATCommNetMLP
 from tar_comm import TarCommNetMLP
 from utils import *
 from action_utils import parse_action_args

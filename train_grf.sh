@@ -1,4 +1,5 @@
- #!/bin/bash
+#!/bin/bash
+export OMP_NUM_THREADS=1
 
 python -u main.py \
   --env_name grf \
@@ -20,9 +21,9 @@ python -u main.py \
   --num_controlled_ragents 0 \
   --reward_type scoring \
   --seed 0 \
-  --plot \
-  --plot_env grf_tar_ic3net_scoring_hid_128_adv_0_seed0 \
-  --plot_port 8009 \
   | tee train.log
 
 #  --render \
+#   --plot \
+#   --plot_env grf_tar_ic3net_scoring_hid_128_adv_0_seed0 \
+#   --plot_port 8009 \

@@ -136,6 +136,10 @@ if args.ic3net:
     args.commnet = 1
     args.hard_attn = 1
     args.mean_ratio = 0
+    
+if args.gacomm:
+    args.commnet = 1
+    args.mean_ratio = 0
 
     # For TJ set comm action to 1 as specified in paper to showcase
     # importance of individual rewards even in cooperative games

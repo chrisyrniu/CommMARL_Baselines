@@ -13,7 +13,7 @@ from models import *
 from comm import CommNetMLP
 from gc_comm import GCCommNetMLP
 from ga_comm import GACommNetMLP
-from gat_comm import GATCommNetMLP
+from gcomm import GCommNetMLP
 from tar_comm import TarCommNetMLP
 from utils import *
 from action_utils import parse_action_args
@@ -48,6 +48,10 @@ parser.add_argument('--value_hid_size', default=32, type=int,
                     help='value size for soft attention')
 parser.add_argument('--recurrent', action='store_true', default=False,
                     help='make the model recurrent in time')
+parser.add_argument('--directed', action='store_true', default=False,
+                    help='if the graph formed by the agents is directed')
+parser.add_argument('--gnn_type', default='gat', type=str,
+                    help='type of gnn to use (gcn|gat)')
 # optimization
 parser.add_argument('--gamma', type=float, default=1.0,
                     help='discount factor')
@@ -87,8 +91,6 @@ parser.add_argument('--load', default='', type=str,
                     help='load the model')
 parser.add_argument('--display', action="store_true", default=False,
                     help='Display environment state')
-
-
 parser.add_argument('--random', action='store_true', default=False,
                     help="enable random model")
 
@@ -103,6 +105,8 @@ parser.add_argument('--tarcomm', action='store_true', default=False,
                     help="enable tarmac model (with commnet or ic3net)")
 parser.add_argument('--gacomm', action='store_true', default=False,
                     help="enable gacomm model")
+parser.add_argument('--gcomm', action='store_true', default=False,
+                    help="enable gcomm model")
 parser.add_argument('--nagents', type=int, default=1,
                     help="Number of agents (used in multiagent)")
 parser.add_argument('--comm_mode', type=str, default='avg',
@@ -138,7 +142,7 @@ if args.ic3net:
     args.hard_attn = 1
     args.mean_ratio = 0
     
-if args.gacomm:
+if args.gacomm or args.gcomm:
     args.commnet = 1
     args.mean_ratio = 0
 
@@ -188,7 +192,9 @@ torch.manual_seed(args.seed)
 
 print(args)
 
-if args.gacomm:
+if args.gcomm:
+    policy_net = GCommNetMLP(args, num_inputs)
+elif args.gacomm:
     policy_net = GACommNetMLP(args, num_inputs)
 elif args.commnet:
     if args.gccomm:
@@ -238,8 +244,9 @@ log['entropy'] = LogField(list(), True, 'epoch', 'num_steps')
 
 if args.plot:
     vis = visdom.Visdom(env=args.plot_env, port=args.plot_port)
-
-if args.gacomm:
+if args.gcomm:
+    model_dir = Path('./saved') / args.env_name / 'gcomm' / args.gnn_type
+elif args.gacomm:
     model_dir = Path('./saved') / args.env_name / 'gacomm'
 elif args.gccomm:
     if args.ic3net:

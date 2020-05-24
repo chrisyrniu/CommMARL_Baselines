@@ -13,19 +13,17 @@ python -u main.py \
   --hid_size 128 \
   --detach_gap 10 \
   --lrate 0.001 \
-  --ic3net \
-  --gacomm \
+  --gcomm \
+  --gnn_type gat \
+  --directed \
   --recurrent \
   --save \
   --save_every 200 \
   --seed 3780 \
-  --plot \
-  --plot_env pp_medium_gacomm_individual_rew_hid_128_seed3780 \
-  --plot_port 8009 \
   | tee train_pp.log
 
 #   --plot \
-#   --plot_env pp_medium_ic3net_hid_128_seed0 \
+#   --plot_env pp_medium_gacomm_individual_rew_hid_128_seed3780 \
 #   --plot_port 8009 \
 
   ## easy

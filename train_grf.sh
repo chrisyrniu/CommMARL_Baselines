@@ -11,17 +11,21 @@ python -u main.py \
   --detach_gap 10 \
   --lrate 0.0015 \
   --max_steps 100 \
-  --ic3net \
-  --tarcomm \
+  --gcomm \
+  --gnn_type gcn \
+  --directed \
   --recurrent \
   --save \
-  --save_every 10 \
+  --save_every 50 \
   --scenario academy_3_vs_1_with_keeper \
   --num_controlled_lagents 3 \
   --num_controlled_ragents 0 \
   --reward_type scoring \
   --seed 0 \
-  | tee train.log
+  --plot \
+  --plot_env grf_gcomm_gcn_scoring_hid_128_adv_0_seed0 \
+  --plot_port 8009 \
+  | tee train_grf.log
 
 #  --render \
 #   --plot \

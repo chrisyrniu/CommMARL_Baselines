@@ -20,7 +20,7 @@ python -u main.py \
   --save_every 200 \
   --seed 0 \
   --plot \
-  --plot_env pp_medium_ac_commnet_hid_128_seed0_run1 \
+  --plot_env pp_medium_ac_v1_commnet_hid_128_seed0_run0 \
   --plot_port 8009 \
   | tee train.log
 

@@ -19,7 +19,10 @@ python -u main.py \
   --recurrent \
   --save \
   --save_every 200 \
-  --seed 3780 \
+  --seed 0 \
+  --plot \
+  --plot_env pp_medium_gcomm_gat_hid_128_seed0_run2 \
+  --plot_port 8097 \
   | tee train_pp.log
 
 #   --plot \

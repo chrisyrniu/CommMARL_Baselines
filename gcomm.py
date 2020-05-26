@@ -22,8 +22,8 @@ class GCommNetMLP(nn.Module):
         self.recurrent = args.recurrent
         
         if args.gnn_type == 'gat':
-            self.gconv1 = GATConv(args.hid_size, int(args.hid_size/4), heads=4, concat=True, dropout=0)
-            self.gconv2 = GATConv(args.hid_size, args.hid_size, heads=1, concat=True, dropout=0)
+            self.gconv1 = GATConv(args.hid_size, int(args.hid_size/4), heads=4, concat=True, dropout=0.2)
+            self.gconv2 = GATConv(args.hid_size, args.hid_size, heads=1, concat=True, dropout=0.2)
         if args.gnn_type == 'gcn':
             self.gconv1 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
             self.gconv2 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)             
@@ -31,14 +31,17 @@ class GCommNetMLP(nn.Module):
         self.hard_attn1 = nn.Sequential(
             nn.Linear(self.hid_size*2, int(self.hid_size/2)),
             nn.ReLU(),
-            nn.Linear(int(self.hid_size/2), 2))
+            nn.Linear(int(self.hid_size/2), int(self.hid_size/8)),
+            nn.ReLU(),
+            nn.Linear(int(self.hid_size/8), 2))
 
         self.hard_attn2 = nn.Sequential(
             nn.Linear(self.hid_size*2, int(self.hid_size/2)),
             nn.ReLU(),
-            nn.Linear(int(self.hid_size/2), 2))
+            nn.Linear(int(self.hid_size/2), int(self.hid_size/8)),
+            nn.ReLU(),
+            nn.Linear(int(self.hid_size/8), 2))
         
-
         self.continuous = args.continuous
         if self.continuous:
             self.action_mean = nn.Linear(args.hid_size, args.dim_actions)
@@ -184,7 +187,7 @@ class GCommNetMLP(nn.Module):
             comm = comm * agent_mask
 
             edge_index1 = self.get_edge_index(self.hard_attn1, hidden_state, agent_mask, self.args.directed)
-            comm = self.gconv1(comm, edge_index1)
+            comm = F.relu(self.gconv1(comm, edge_index1))
             edge_index2 = self.get_edge_index(self.hard_attn2, comm, agent_mask, self.args.directed)
             comm = self.gconv2(comm, edge_index2)
             

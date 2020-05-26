@@ -276,8 +276,9 @@ class Trainer(object):
             baseline.append(agent_baseline)
 
         # size: batch_size * n
-        baseline = torch.cat(baseline, dim=1)    
-        advantages = returns - baseline
+        baseline = torch.cat(
+            baseline, dim=1)    
+        advantages = returns 
         
         if self.args.normalize_rewards:
             advantages = (advantages - advantages.mean()) / advantages.std()
@@ -291,12 +292,12 @@ class Trainer(object):
             # size: (batch_size*n) * dim_actions
             log_prob = multinomials_log_densities(actions, log_p_a)
             # the log prob of each action head is multiplied by the advantage
-            actor_loss = -advantages.view(-1).unsqueeze(-1) * log_prob
+            actor_loss = -advantages.contiguous().view(-1).unsqueeze(-1) * log_prob
             actor_loss *= alive_masks.unsqueeze(-1)
         else: # any difference between this and the advantages_per_action after actor_loss.sum()?
             # size: (batch_size*n) * 1
             log_prob = multinomials_log_density(actions, log_p_a)
-            actor_loss = -advantages.view(-1) * log_prob.squeeze()
+            actor_loss = -advantages.contiguous().view(-1) * log_prob.squeeze()
             actor_loss *= alive_masks
 
         actor_loss = actor_loss.sum()
@@ -312,6 +313,54 @@ class Trainer(object):
                 actor_loss -= self.args.entr * entropy
         
         actor_loss.backward()
+        
+        
+#################### debug #######################
+        coop_returns = torch.Tensor(batch_size, n)
+        ncoop_returns = torch.Tensor(batch_size, n)
+        rewards = torch.Tensor(batch.reward)
+        returns = torch.Tensor(batch_size, n)
+        prev_coop_return = 0
+        prev_ncoop_return = 0
+        
+        for i in reversed(range(rewards.size(0))):
+            coop_returns[i] = rewards[i] + self.args.gamma * prev_coop_return * episode_masks[i]
+            ncoop_returns[i] = rewards[i] + self.args.gamma * prev_ncoop_return * episode_masks[i] * episode_mini_masks[i]
+
+            prev_coop_return = coop_returns[i].clone()
+            prev_ncoop_return = ncoop_returns[i].clone()
+
+            returns[i] = (self.args.mean_ratio * coop_returns[i].mean()) \
+                        + ((1 - self.args.mean_ratio) * ncoop_returns[i])
+            
+        advantages = torch.Tensor(batch_size, n)
+        for i in reversed(range(rewards.size(0))):
+            advantages[i] = returns[i]
+        
+        if self.args.normalize_rewards:
+            advantages = (advantages - advantages.mean()) / advantages.std()
+
+        # element size: (batch_size*n) * num_actions[i]
+        log_p_a = [action_out[i].view(-1, num_actions[i]) for i in range(dim_actions)]
+        # size: (batch_size*n) * dim_actions
+        actions = actions.contiguous().view(-1, dim_actions)
+
+        if self.args.advantages_per_action:
+            # size: (batch_size*n) * dim_actions
+            log_prob = multinomials_log_densities(actions, log_p_a)
+            # the log prob of each action head is multiplied by the advantage
+            actor_loss = -advantages.contiguous().view(-1).unsqueeze(-1) * log_prob
+            actor_loss *= alive_masks.unsqueeze(-1)
+        else: # any difference between this and the advantages_per_action after actor_loss.sum()?
+            # size: (batch_size*n) * 1
+            log_prob = multinomials_log_density(actions, log_p_a)
+            actor_loss = -advantages.contiguous().view(-1) * log_prob.squeeze()
+            actor_loss *= alive_masks
+
+        actor_loss = actor_loss.sum()
+        stat['ref_actor_loss'] = actor_loss.item() 
+        
+#################### debug #######################
         
         return stat
 

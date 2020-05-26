@@ -191,7 +191,7 @@ class Trainer(object):
             returns[i] = (self.args.mean_ratio * coop_returns[i].mean()) \
                         + ((1 - self.args.mean_ratio) * ncoop_returns[i])
         
-        critic_loss = (returns - critic_out).pow(2) # divided by?
+        critic_loss = (returns - critic_out).pow(2) / 2 # divided by?
         critic_loss *= alive_masks
         critic_loss = critic_loss.sum()
         stat['critic_loss'] = critic_loss.item()
@@ -239,6 +239,9 @@ class Trainer(object):
         # element size: batch_size * n * num_actions[i]
         action_out = [torch.cat(a, dim=0) for a in action_out]
         
+        values = torch.cat(batch.value, dim=0)
+        values = values.view(batch_size, n)
+        
         returns = self.critic(hidden_state, actions).detach()
         returns = returns.expand(batch_size, n)
         
@@ -279,11 +282,8 @@ class Trainer(object):
 #         baseline = torch.cat(
 #             baseline, dim=1)   
 
-        values = torch.cat(batch.value, dim=0)
-        values = values.view(batch_size, n)
 
-        for i in reversed(range(rewards.size(0))):
-            advantages[i] = returns[i] - values.data[i]
+        advantages = returns - values.data
         
         if self.args.normalize_rewards:
             advantages = (advantages - advantages.mean()) / advantages.std()
@@ -351,7 +351,7 @@ class Trainer(object):
             
         advantages = torch.Tensor(batch_size, n)
         for i in reversed(range(rewards.size(0))):
-            advantages[i] = returns[i]
+            advantages[i] = returns[i] - values.data[i]
         
         if self.args.normalize_rewards:
             advantages = (advantages - advantages.mean()) / advantages.std()

@@ -13,16 +13,17 @@ python -u main.py \
   --hid_size 128 \
   --detach_gap 10 \
   --critic_lrate 0.0005 \
-  --actor_lrate 0.0005 \
-  --commnet \
+  --actor_lrate 0.005 \
+  --ic3net \
+  --tarcomm \
   --recurrent \
   --save \
   --save_every 200 \
   --seed 0 \
   --plot \
-  --plot_env pp_medium_ac_v1_commnet_hid_128_seed0_run0 \
+  --plot_env pp_medium_ac_v1_tar_ic3_hid_128_seed0_run1 \
   --plot_port 8009 \
-  | tee train.log
+  | tee train_pp.log
 
   # --plot \
   # --plot_env predator_prey \

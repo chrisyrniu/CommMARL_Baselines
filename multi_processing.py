@@ -25,10 +25,11 @@ class MultiProcessWorker(mp.Process):
                 return
             elif task == 'run_batch':
                 batch, stat = self.trainer.run_batch(epoch)
+                self.comm.send(stat)
+            elif task == 'comp_critic':
                 self.trainer.critic_optimizer.zero_grad()
                 s = self.trainer.comp_critic_grad(batch)
-                merge_stat(s, stat)
-                self.comm.send(stat)
+                self.comm.send(s)
             elif task == 'send_critic_grads':
                 critic_grads = []
                 for p in self.trainer.critic_params:
@@ -89,29 +90,39 @@ class MultiProcessTrainer(object):
 
         # run its own trainer
         batch, stat = self.trainer.run_batch(epoch)
-        self.trainer.critic_optimizer.zero_grad()
-        s = self.trainer.comp_critic_grad(batch)
-        merge_stat(s, stat)
 
         # check if workers are finished
         for comm in self.comms:
             s = comm.recv()
             merge_stat(s, stat)
-
-        # add gradients
-        self.obtain_grad_pointers()
-        # add critic gradients of workers
-        if self.worker_critic_grads is None:
-            self.worker_critic_grads = []
+           
+        num_rounds = 100
+        for n in range(num_rounds):
             for comm in self.comms:
-                comm.send('send_critic_grads')
-                self.worker_critic_grads.append(comm.recv())
-                
-        for i in range(len(self.critic_grads)):
-            for g in self.worker_critic_grads:
-                self.critic_grads[i] += g[i]
-            self.critic_grads[i] /= stat['num_steps']
-        self.trainer.critic_optimizer.step()
+                comm.send(['comp_critic', epoch])
+
+            self.trainer.critic_optimizer.zero_grad()
+            s = self.trainer.comp_critic_grad(batch)
+            merge_stat(s, stat)
+
+            for comm in self.comms:
+                s = comm.recv()
+                merge_stat(s, stat)
+
+            # add gradients
+            self.obtain_grad_pointers()
+            # add critic gradients of workers
+            if self.worker_critic_grads is None:
+                self.worker_critic_grads = []
+                for comm in self.comms:
+                    comm.send('send_critic_grads')
+                    self.worker_critic_grads.append(comm.recv())
+
+            for i in range(len(self.critic_grads)):
+                for g in self.worker_critic_grads:
+                    self.critic_grads[i] += g[i]
+                self.critic_grads[i] /= stat['num_steps']
+            self.trainer.critic_optimizer.step()
         
         for comm in self.comms:
             comm.send(['comp_actor', epoch])

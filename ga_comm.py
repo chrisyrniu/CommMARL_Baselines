@@ -74,6 +74,8 @@ class GACommNetMLP(nn.Module):
             for i in range(self.comm_passes):
                 self.C_modules[i].weight.data.zero_()
         self.tanh = nn.Tanh()
+        
+        self.value_head = nn.Linear(self.hid_size, 1)
 
         # hard attention layers to form the graph 
         self.lstm = nn.LSTM(args.hid_size * 2, args.hid_size * 2, bidirectional=True)
@@ -215,6 +217,7 @@ class GACommNetMLP(nn.Module):
             comm = comm.view(batch_size, n, self.hid_size)
             comm = comm * agent_mask
 
+        value_head = self.value_head(hidden_state)
         h = hidden_state.view(batch_size, n, self.hid_size)
 
         if self.continuous:
@@ -228,9 +231,9 @@ class GACommNetMLP(nn.Module):
             action = [F.log_softmax(head(torch.cat([h, comm], dim=-1)), dim=-1) for head in self.heads]
 
         if self.args.recurrent:
-            return action, (hidden_state.clone(), cell_state.clone())
+            return action, value_head, (hidden_state.clone(), cell_state.clone())
         else:
-            return action
+            return action, value_head
 
     def init_weights(self, m):
         if type(m) == nn.Linear:

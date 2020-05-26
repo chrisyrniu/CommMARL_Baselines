@@ -87,6 +87,8 @@ class TarCommNetMLP(nn.Module):
             for i in range(self.comm_passes):
                 self.C_modules[i].weight.data.zero_()
         self.tanh = nn.Tanh()
+        
+        self.value_head = nn.Linear(self.hid_size, 1)
 
         # soft attention layers 
         self.wq = nn.Linear(args.hid_size, args.qk_hid_size)
@@ -229,6 +231,7 @@ class TarCommNetMLP(nn.Module):
 
         # v = torch.stack([self.value_head(hidden_state[:, i, :]) for i in range(n)])
         # v = v.view(hidden_state.size(0), n, -1)
+        value_head = self.value_head(hidden_state)
         h = hidden_state.view(batch_size, n, self.hid_size)
 
         if self.continuous:
@@ -242,9 +245,9 @@ class TarCommNetMLP(nn.Module):
             action = [F.log_softmax(head(h), dim=-1) for head in self.heads]
 
         if self.args.recurrent:
-            return action, (hidden_state.clone(), cell_state.clone())
+            return action, value_head, (hidden_state.clone(), cell_state.clone())
         else:
-            return action
+            return action, value_head
 
     def init_weights(self, m):
         if type(m) == nn.Linear:

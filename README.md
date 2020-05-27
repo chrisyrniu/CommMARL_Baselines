@@ -2,4 +2,4 @@
  
 Batch Actor-Critic version using Monte Carlo estimate.
 
-The original value function is used as the baseline.
+The critic is only used for the counterfactual baseline.

@@ -96,7 +96,7 @@ class MultiProcessTrainer(object):
             s = comm.recv()
             merge_stat(s, stat)
            
-        num_rounds = 100
+        num_rounds = 10
         for n in range(num_rounds):
             for comm in self.comms:
                 comm.send(['comp_critic', epoch])

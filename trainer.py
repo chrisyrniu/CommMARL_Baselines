@@ -8,7 +8,7 @@ from utils import *
 from action_utils import *
 import itertools
 
-Transition = namedtuple('Transition', ('state', 'hidden_state', 'action', 'action_out', 'value', 'episode_mask', 'episode_mini_mask', 'next_state', 'reward', 'misc'))
+Transition = namedtuple('Transition', ('state', 'hidden_state', 'action', 'action_out', 'episode_mask', 'episode_mini_mask', 'next_state', 'reward', 'misc'))
 
 
 class Trainer(object):
@@ -57,7 +57,7 @@ class Trainer(object):
                     prev_hid = self.actor.init_hidden(batch_size=state.shape[0])
 
                 x = [state, prev_hid]
-                action_out, value, prev_hid = self.actor(x, info)
+                action_out, prev_hid = self.actor(x, info)
                 hidden_state = prev_hid[0].clone().detach()
 
                 if (t + 1) % self.args.detach_gap == 0:
@@ -67,7 +67,7 @@ class Trainer(object):
                         prev_hid = prev_hid.detach()
             else:
                 x = state
-                action_out, value = self.actor(x, info)
+                action_out = self.actor(x, info)
 
             action = select_action(self.args, action_out)
             action, actual = translate_action(self.args, self.env, action)
@@ -108,7 +108,7 @@ class Trainer(object):
             if should_display:
                 self.env.display()
 
-            trans = Transition(state, hidden_state, action, action_out, value, episode_mask, episode_mini_mask, next_state, reward, misc)
+            trans = Transition(state, hidden_state, action, action_out, episode_mask, episode_mini_mask, next_state, reward, misc)
             episode.append(trans)
             state = next_state
             if done:
@@ -239,106 +239,14 @@ class Trainer(object):
         # element size: batch_size * n * num_actions[i]
         action_out = [torch.cat(a, dim=0) for a in action_out]
         
-        values = torch.cat(batch.value, dim=0)
-        values = values.view(batch_size, n)
         
-        returns = self.critic(hidden_state, actions).detach()
-        returns = returns.expand(batch_size, n)
-        
-#         ## calculate counterfactual baseline
-#         action_index_list = [[j for j in range(num_actions[i])]  for i in range(dim_actions)]
-#         # a list of all the possible combinations of differnet action heads 
-#         action_index_combo = list(itertools.product(*action_index_list))
-
-#         baseline = []
-#         for agent_idx in range(n):
-#             # element size: batch_size * num_actions[i]
-#             log_p_agent = [action_out[i][:, agent_idx, :].view(-1, num_actions[i]) for i in range(dim_actions)]
-#             # print(log_p_agent[1].size())
-#             agent_baseline = []
-#             # prob = []
-#             for action_combo in action_index_combo:
-#                 # size: 1 * dim_actions
-#                 action_combo = torch.Tensor(action_combo).view(-1, dim_actions)
-#                 action_marginalized = actions.clone()
-#                 action_marginalized[:, agent_idx, :] = action_combo
-#                 # size: batch_size * 1
-#                 critic_marginalized = self.critic(hidden_state, action_marginalized).detach()
-#                 # size: batch_size * dim_actions
-#                 agent_actions = action_marginalized[:, agent_idx, :]
-#                 # size: batch_size * 1
-#                 log_prob_agent = multinomials_log_density(agent_actions, log_p_agent)
-                
-#                 agent_baseline.append(critic_marginalized * torch.exp(log_prob_agent))
-#                 # prob.append(torch.exp(log_prob_agent))
-
-#             # size: batch_size * 1
-#             agent_baseline = torch.cat(agent_baseline, dim=1).sum(dim=1).unsqueeze(dim=-1)
-#             # prob = torch.cat(prob, dim=1).sum(dim=1)
-#             # print(prob)  # the element here should be one 
-#             baseline.append(agent_baseline)
-
-#         # size: batch_size * n
-#         baseline = torch.cat(
-#             baseline, dim=1)   
-
-
-        advantages = returns - values.data
-        
-        if self.args.normalize_rewards:
-            advantages = (advantages - advantages.mean()) / advantages.std()
-
-        # element size: (batch_size*n) * num_actions[i]
-        log_p_a = [action_out[i].view(-1, num_actions[i]) for i in range(dim_actions)]
-        # size: (batch_size*n) * dim_actions
-        actions = actions.contiguous().view(-1, dim_actions)
-
-        if self.args.advantages_per_action:
-            # size: (batch_size*n) * dim_actions
-            log_prob = multinomials_log_densities(actions, log_p_a)
-            # the log prob of each action head is multiplied by the advantage
-            action_loss = -advantages.contiguous().view(-1).unsqueeze(-1) * log_prob
-            action_loss *= alive_masks.unsqueeze(-1)
-        else: # any difference between this and the advantages_per_action after action_loss.sum()?
-            # size: (batch_size*n) * 1
-            log_prob = multinomials_log_density(actions, log_p_a)
-            action_loss = -advantages.contiguous().view(-1) * log_prob.squeeze()
-            action_loss *= alive_masks
-
-        action_loss = action_loss.sum()
-        stat['action_loss'] = action_loss.item()
-        
-        # value loss term
-        targets = returns
-        value_loss = (values - targets).pow(2).view(-1)
-        value_loss *= alive_masks
-        value_loss = value_loss.sum()
-
-        stat['value_loss'] = value_loss.item()
-        actor_loss = action_loss + self.args.value_coeff * value_loss
-        
-        if not self.args.continuous:
-            # entropy regularization term
-            entropy = 0
-            for i in range(len(log_p_a)):
-                entropy -= (log_p_a[i] * log_p_a[i].exp()).sum()
-            stat['entropy'] = entropy.item()
-            if self.args.entr > 0:
-                actor_loss -= self.args.entr * entropy
-                
-        stat['actor_loss'] = actor_loss.item()
-        
-        actor_loss.backward()
-        
-        
-#################### debug #######################
         coop_returns = torch.Tensor(batch_size, n)
         ncoop_returns = torch.Tensor(batch_size, n)
-        rewards = torch.Tensor(batch.reward)
         returns = torch.Tensor(batch_size, n)
+
         prev_coop_return = 0
         prev_ncoop_return = 0
-        
+
         for i in reversed(range(rewards.size(0))):
             coop_returns[i] = rewards[i] + self.args.gamma * prev_coop_return * episode_masks[i]
             ncoop_returns[i] = rewards[i] + self.args.gamma * prev_ncoop_return * episode_masks[i] * episode_mini_masks[i]
@@ -348,10 +256,46 @@ class Trainer(object):
 
             returns[i] = (self.args.mean_ratio * coop_returns[i].mean()) \
                         + ((1 - self.args.mean_ratio) * ncoop_returns[i])
-            
-        advantages = torch.Tensor(batch_size, n)
-        for i in reversed(range(rewards.size(0))):
-            advantages[i] = returns[i] - values.data[i]
+        
+        ## calculate counterfactual baseline
+        action_index_list = [[j for j in range(num_actions[i])]  for i in range(dim_actions)]
+        # a list of all the possible combinations of differnet action heads 
+        action_index_combo = list(itertools.product(*action_index_list))
+
+        baseline = []
+        for agent_idx in range(n):
+            # element size: batch_size * num_actions[i]
+            log_p_agent = [action_out[i][:, agent_idx, :].view(-1, num_actions[i]) for i in range(dim_actions)]
+            # print(log_p_agent[1].size())
+            agent_baseline = []
+            # prob = []
+            for action_combo in action_index_combo:
+                # size: 1 * dim_actions
+                action_combo = torch.Tensor(action_combo).view(-1, dim_actions)
+                action_marginalized = actions.clone()
+                action_marginalized[:, agent_idx, :] = action_combo
+                # size: batch_size * 1
+                critic_marginalized = self.critic(hidden_state, action_marginalized).detach()
+                # size: batch_size * dim_actions
+                agent_actions = action_marginalized[:, agent_idx, :]
+                # size: batch_size * 1
+                log_prob_agent = multinomials_log_density(agent_actions, log_p_agent)
+                
+                agent_baseline.append(critic_marginalized * torch.exp(log_prob_agent))
+                # prob.append(torch.exp(log_prob_agent))
+
+            # size: batch_size * 1
+            agent_baseline = torch.cat(agent_baseline, dim=1).sum(dim=1).unsqueeze(dim=-1)
+            # prob = torch.cat(prob, dim=1).sum(dim=1)
+            # print(prob)  # the element here should be one 
+            baseline.append(agent_baseline)
+
+        # size: batch_size * n
+        baseline = torch.cat(
+            baseline, dim=1)   
+
+
+        advantages = returns
         
         if self.args.normalize_rewards:
             advantages = (advantages - advantages.mean()) / advantages.std()
@@ -374,9 +318,20 @@ class Trainer(object):
             actor_loss *= alive_masks
 
         actor_loss = actor_loss.sum()
-        stat['ref_actor_loss'] = actor_loss.item() 
         
-#################### debug #######################
+        
+        if not self.args.continuous:
+            # entropy regularization term
+            entropy = 0
+            for i in range(len(log_p_a)):
+                entropy -= (log_p_a[i] * log_p_a[i].exp()).sum()
+            stat['entropy'] = entropy.item()
+            if self.args.entr > 0:
+                actor_loss -= self.args.entr * entropy
+                
+        stat['actor_loss'] = actor_loss.item()
+        
+        actor_loss.backward()
         
         return stat
 

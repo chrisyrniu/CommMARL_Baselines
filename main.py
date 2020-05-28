@@ -236,9 +236,6 @@ log['comm_action'] = LogField(list(), True, 'epoch', 'num_steps')
 log['enemy_comm'] = LogField(list(), True, 'epoch', 'num_steps')
 log['critic_loss'] = LogField(list(), True, 'epoch', 'num_steps')
 log['actor_loss'] = LogField(list(), True, 'epoch', 'num_steps')
-log['ref_actor_loss'] = LogField(list(), True, 'epoch', 'num_steps')
-log['value_loss'] = LogField(list(), True, 'epoch', 'num_steps')
-log['action_loss'] = LogField(list(), True, 'epoch', 'num_steps')
 log['entropy'] = LogField(list(), True, 'epoch', 'num_steps')
 
 if args.plot:

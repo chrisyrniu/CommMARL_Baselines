@@ -82,7 +82,7 @@ class GCCommNetMLP(nn.Module):
                 self.C_modules[i].weight.data.zero_()
         self.tanh = nn.Tanh()
         
-        self.value_head = nn.Linear(self.hid_size, 1)
+#         self.value_head = nn.Linear(self.hid_size, 1)
 
 
     def get_agent_mask(self, batch_size, info):
@@ -213,7 +213,7 @@ class GCCommNetMLP(nn.Module):
                 hidden_state = sum([x, self.f_modules[i](hidden_state), c])
                 hidden_state = self.tanh(hidden_state)
 
-        value_head = self.value_head(hidden_state)
+#         value_head = self.value_head(hidden_state)
         h = hidden_state.view(batch_size, n, self.hid_size)
 
         if self.continuous:
@@ -227,9 +227,9 @@ class GCCommNetMLP(nn.Module):
             action = [F.log_softmax(head(h), dim=-1) for head in self.heads]
 
         if self.args.recurrent:
-            return action, value_head, (hidden_state.clone(), cell_state.clone())
+            return action, (hidden_state.clone(), cell_state.clone())
         else:
-            return action, value_head
+            return action
 
     def init_weights(self, m):
         if type(m) == nn.Linear:

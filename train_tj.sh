@@ -15,6 +15,7 @@ python -u main.py \
   --epoch_size 10 \
   --hid_size 128 \
   --detach_gap 10 \
+  --value_coeff 0.5 \
   --lrate 0.0005 \
   --ic3net \
   --tarcomm \
@@ -22,13 +23,14 @@ python -u main.py \
   --curr_start 500 \
   --curr_end 500 \
   --save \
-  --save_every 100 \
-  --seed 0 \
+  --plot \
+  --plot_env tj_medium_ac_shared_tar_ic3_hid_128_seed0_no_curriculum_0.1 \
+  --plot_port 8009 \
   | tee train_tj.log
 
-#   --plot \
-#   --plot_env tj_medium_gc_ic3net_hid_128_seed0_no_curriculum_0.1 \
-#   --plot_port 8009 \
+  # --plot \
+  # --plot_env traffic_juction \
+  # --plot_port 8009 \
 
   ## easy
   # --nagents 5 \

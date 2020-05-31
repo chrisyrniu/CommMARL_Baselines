@@ -12,17 +12,17 @@ python -u main.py \
   --epoch_size 10 \
   --hid_size 128 \
   --detach_gap 10 \
-  --lrate 0.001 \
-  --gcomm \
-  --gnn_type gat \
-  --directed \
+  --value_coeff 0.5 \
+  --lrate 0.0015 \
+  --ic3net \
+  --tarcomm \
   --recurrent \
   --save \
   --save_every 200 \
   --seed 0 \
   --plot \
-  --plot_env pp_medium_gcomm_gat_hid_128_seed0_run2 \
-  --plot_port 8097 \
+  --plot_env pp_medium_ac_shared_tar_ic3_hid_128_seed0_run6 \
+  --plot_port 8009 \
   | tee train_pp.log
 
 #   --plot \

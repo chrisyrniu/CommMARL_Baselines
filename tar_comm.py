@@ -95,7 +95,12 @@ class TarCommNetMLP(nn.Module):
         # Init weights for linear layers
         # self.apply(self.init_weights)
 
-        self.value_head = nn.Linear(self.hid_size, 1)
+        self.value_head = nn.Sequential(
+            nn.Linear(self.hid_size, self.hid_size),
+            nn.ReLU(),
+            nn.Linear(self.hid_size, self.hid_size),
+            nn.ReLU(),
+            nn.Linear(self.hid_size, 1))
 
         # soft attention layers 
         self.wq = nn.Linear(args.hid_size, args.qk_hid_size)

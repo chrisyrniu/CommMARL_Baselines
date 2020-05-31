@@ -149,31 +149,24 @@ class Trainer(object):
 
         alive_masks = torch.Tensor(np.concatenate([item['alive_mask'] for item in batch.misc])).view(-1)
 
-        coop_returns = torch.Tensor(batch_size, n)
-        ncoop_returns = torch.Tensor(batch_size, n)
-        returns = torch.Tensor(batch_size, n)
-        deltas = torch.Tensor(batch_size, n)
+
         advantages = torch.Tensor(batch_size, n)
         values = values.view(batch_size, n)
+        
+        next_values = torch.cat([values.data[1:, :], torch.zeros((1, n))], dim=0)
+        q_values = rewards + self.args.gamma * next_values * episode_masks * episode_mini_masks
 
-        prev_coop_return = 0
-        prev_ncoop_return = 0
-        prev_value = 0
-        prev_advantage = 0
-
-        for i in reversed(range(rewards.size(0))):
-            coop_returns[i] = rewards[i] + self.args.gamma * prev_coop_return * episode_masks[i]
-            ncoop_returns[i] = rewards[i] + self.args.gamma * prev_ncoop_return * episode_masks[i] * episode_mini_masks[i]
-
-            prev_coop_return = coop_returns[i].clone()
-            prev_ncoop_return = ncoop_returns[i].clone()
-
-            returns[i] = (self.args.mean_ratio * coop_returns[i].mean()) \
-                        + ((1 - self.args.mean_ratio) * ncoop_returns[i])
-
+        # mask the dead agents (in fact the agent is dead after taking action? so should mask next step?)
+        # size: batch_size * n
+        alive_masks = alive_masks.view(batch_size, n)
+        # pad 0 at the start
+        if self.args.env_name == "traffic_junction":
+            alive_masks = torch.cat([torch.zeros(1, n), alive_masks[:-1, :]], dim=0)
+        
+        alive_masks = alive_masks.view(-1)
 
         for i in reversed(range(rewards.size(0))):
-            advantages[i] = returns[i] - values.data[i]
+            advantages[i] = q_values[i] - values.data[i]
 
         if self.args.normalize_rewards:
             advantages = (advantages - advantages.mean()) / advantages.std()
@@ -200,6 +193,25 @@ class Trainer(object):
         action_loss = action_loss.sum()
         stat['action_loss'] = action_loss.item()
 
+        
+        coop_returns = torch.Tensor(batch_size, n)
+        ncoop_returns = torch.Tensor(batch_size, n)
+        returns = torch.Tensor(batch_size, n)
+        prev_coop_return = 0
+        prev_ncoop_return = 0
+        prev_value = 0
+        prev_advantage = 0
+
+        for i in reversed(range(rewards.size(0))):
+            coop_returns[i] = rewards[i] + self.args.gamma * prev_coop_return * episode_masks[i]
+            ncoop_returns[i] = rewards[i] + self.args.gamma * prev_ncoop_return * episode_masks[i] * episode_mini_masks[i]
+
+            prev_coop_return = coop_returns[i].clone()
+            prev_ncoop_return = ncoop_returns[i].clone()
+
+            returns[i] = (self.args.mean_ratio * coop_returns[i].mean()) \
+                        + ((1 - self.args.mean_ratio) * ncoop_returns[i])        
+        
         # value loss term
         targets = returns
         value_loss = (values - targets).pow(2).view(-1)
@@ -208,7 +220,14 @@ class Trainer(object):
 
         stat['value_loss'] = value_loss.item()
         loss = action_loss + self.args.value_coeff * value_loss
-
+        
+        advantages_ref = advantages.pow(2).view(-1)
+        advantages_ref *= alive_masks
+        advantages_ref = advantages_ref.sum()
+        
+        stat['advantages_ref'] = advantages_ref.item()
+        
+        
         if not self.args.continuous:
             # entropy regularization term
             entropy = 0

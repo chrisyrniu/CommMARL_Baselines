@@ -95,8 +95,9 @@ class TarCommNetMLP(nn.Module):
         # Init weights for linear layers
         # self.apply(self.init_weights)
 
+        self.value_input_dim = args.hid_size + args.nagents * sum(args.num_actions)
         self.value_head = nn.Sequential(
-            nn.Linear(self.hid_size, self.hid_size),
+            nn.Linear(self.value_input_dim, self.hid_size),
             nn.ReLU(),
             nn.Linear(self.hid_size, self.hid_size),
             nn.ReLU(),
@@ -106,41 +107,6 @@ class TarCommNetMLP(nn.Module):
         self.wq = nn.Linear(args.hid_size, args.qk_hid_size)
         self.wk = nn.Linear(args.hid_size, args.qk_hid_size)
         self.wv = nn.Linear(args.hid_size, args.value_hid_size)
-
-
-    def get_agent_mask(self, batch_size, info):
-        n = self.nagents
-
-        if 'alive_mask' in info:
-            agent_mask = torch.from_numpy(info['alive_mask'])
-            num_agents_alive = agent_mask.sum()
-        else:
-            agent_mask = torch.ones(n)
-            num_agents_alive = n
-
-        agent_mask = agent_mask.view(1, 1, n)
-        agent_mask = agent_mask.expand(batch_size, n, n).unsqueeze(-1).clone()
-
-        return num_agents_alive, agent_mask
-
-    def forward_state_encoder(self, x):
-        hidden_state, cell_state = None, None
-
-        if self.args.recurrent:
-            x, extras = x
-            x = self.encoder(x)
-
-            if self.args.rnn_type == 'LSTM':
-                hidden_state, cell_state = extras
-            else:
-                hidden_state = extras
-            # hidden_state = self.tanh( self.hidd_encoder(prev_hidden_state) + x)
-        else:
-            x = self.encoder(x)
-            x = self.tanh(x)
-            hidden_state = x
-
-        return x, hidden_state, cell_state
 
 
     def forward(self, x, info={}):
@@ -164,13 +130,6 @@ class TarCommNetMLP(nn.Module):
                 case of discrete, mean and std in case of continuous)
                 v: value head
         """
-
-        # if self.args.env_name == 'starcraft':
-        #     maxi = x.max(dim=-2)[0]
-        #     x = self.state_encoder(x)
-        #     x = x.sum(dim=-2)
-        #     x = torch.cat([x, maxi], dim=-1)
-        #     x = self.tanh(x)
 
         x, hidden_state, cell_state = self.forward_state_encoder(x)
 
@@ -241,10 +200,7 @@ class TarCommNetMLP(nn.Module):
                 # and Add skip connection from start and sum them
                 hidden_state = sum([x, self.f_modules[i](hidden_state), c])
                 hidden_state = self.tanh(hidden_state)
-
-        # v = torch.stack([self.value_head(hidden_state[:, i, :]) for i in range(n)])
-        # v = v.view(hidden_state.size(0), n, -1)
-        value_head = self.value_head(hidden_state)
+        
         h = hidden_state.view(batch_size, n, self.hid_size)
 
         if self.continuous:
@@ -252,20 +208,85 @@ class TarCommNetMLP(nn.Module):
             action_log_std = self.action_log_std.expand_as(action_mean)
             action_std = torch.exp(action_log_std)
             # will be used later to sample
-            action = (action_mean, action_log_std, action_std)
+            action_out = (action_mean, action_log_std, action_std)
         else:
             # discrete actions
-            action = [F.log_softmax(head(h), dim=-1) for head in self.heads]
+            action_out = [F.log_softmax(head(h), dim=-1) for head in self.heads]
+
+        action = select_action(self.args, action_out)  
+        
+        # here only consider discrete actions
+        critic_in = self.build_q_input(hidden_state, action)
+        value_head = self.value_head(critic_in)
+            
+            
+        if self.args.recurrent:
+            return action_out, action, value_head, (hidden_state.clone(), cell_state.clone())
+        else:
+            return action_out, action, value_head
+
+        
+    def build_q_input(self, hidden_state, action):
+        n = self.args.nagents
+        num_actions = self.args.num_actions
+        dim_actions = self.args.dim_actions   
+        actions = [x.squeeze().data.numpy() for x in action]
+        actions = torch.Tensor(actions)
+        actions = actions.transpose(0, 1).view(n, dim_actions)
+        actions = actions.unsqueeze(0).expand(n, n, dim_actions)
+        actions_onehot = [torch.Tensor(n, n, num_actions[i]) for i in range(dim_actions)]    
+        for i in range(dim_actions):
+            actions_onehot[i].zero_()
+            actions_onehot[i].scatter_(2, actions[:,:,i].unsqueeze(dim=-1).long(), 1)
+            # size: n * (n*num_actions[i])
+            actions_onehot[i] = actions_onehot[i].view(n, n*num_actions[i])
+        # size: n * (hid_size + n*sum(num_actions))
+        critic_in = torch.cat([hidden_state, torch.cat(actions_onehot, dim=1)], dim=1)
+        
+        return critic_in
+        
+        
+    def get_agent_mask(self, batch_size, info):
+        n = self.nagents
+
+        if 'alive_mask' in info:
+            agent_mask = torch.from_numpy(info['alive_mask'])
+            num_agents_alive = agent_mask.sum()
+        else:
+            agent_mask = torch.ones(n)
+            num_agents_alive = n
+
+        agent_mask = agent_mask.view(1, 1, n)
+        agent_mask = agent_mask.expand(batch_size, n, n).unsqueeze(-1).clone()
+
+        return num_agents_alive, agent_mask
+
+    
+    def forward_state_encoder(self, x):
+        hidden_state, cell_state = None, None
 
         if self.args.recurrent:
-            return action, value_head, (hidden_state.clone(), cell_state.clone())
-        else:
-            return action, value_head
+            x, extras = x
+            x = self.encoder(x)
 
+            if self.args.rnn_type == 'LSTM':
+                hidden_state, cell_state = extras
+            else:
+                hidden_state = extras
+            # hidden_state = self.tanh( self.hidd_encoder(prev_hidden_state) + x)
+        else:
+            x = self.encoder(x)
+            x = self.tanh(x)
+            hidden_state = x
+
+        return x, hidden_state, cell_state
+        
+        
     def init_weights(self, m):
         if type(m) == nn.Linear:
             m.weight.data.normal_(0, self.init_std)
 
+            
     def init_hidden(self, batch_size):
         # dim 0 = num of layers * num of direction
         return tuple(( torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True),

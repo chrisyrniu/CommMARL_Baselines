@@ -9,8 +9,8 @@ python -u main.py \
   --epoch_size 10 \
   --hid_size 128 \
   --detach_gap 10 \
-  --value_coeff 0.5 \
-  --lrate 0.0008 \
+  --value_coeff 0.1 \
+  --lrate 0.0015 \
   --max_steps 100 \
   --ic3net \
   --tarcomm \
@@ -23,11 +23,11 @@ python -u main.py \
   --reward_type scoring \
   --seed 0 \
   --plot \
-  --plot_env grf_ac_shared_tar_ic3_scoring_hid_128_adv_0_seed0_run3 \
+  --plot_env grf_ac_shared_v1_tar_ic3_scoring_hid_128_adv_0_seed0_run1 \
   --plot_port 8009 \
   | tee train_grf.log
 
 #  --render \
 #   --plot \
-#   --plot_env grf_tar_ic3net_scoring_hid_128_adv_0_seed0 \
+#   --plot_env grf_ac_shared_v1_tar_ic3_scoring_hid_128_adv_0_seed0_run1 \
 #   --plot_port 8009 \

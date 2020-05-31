@@ -50,7 +50,7 @@ class Trainer(object):
                     prev_hid = self.policy_net.init_hidden(batch_size=state.shape[0])
 
                 x = [state, prev_hid]
-                action_out, value, prev_hid = self.policy_net(x, info)
+                action_out, action, value, prev_hid = self.policy_net(x, info)
 
                 if (t + 1) % self.args.detach_gap == 0:
                     if self.args.rnn_type == 'LSTM':
@@ -59,9 +59,8 @@ class Trainer(object):
                         prev_hid = prev_hid.detach()
             else:
                 x = state
-                action_out, value = self.policy_net(x, info)
-
-            action = select_action(self.args, action_out)
+                action_out, action, value = self.policy_net(x, info)
+                
             action, actual = translate_action(self.args, self.env, action)
             next_state, reward, done, info = self.env.step(actual)
 
@@ -152,9 +151,6 @@ class Trainer(object):
 
         advantages = torch.Tensor(batch_size, n)
         values = values.view(batch_size, n)
-        
-        next_values = torch.cat([values.data[1:, :], torch.zeros((1, n))], dim=0)
-        q_values = rewards + self.args.gamma * next_values * episode_masks * episode_mini_masks
 
         # mask the dead agents (in fact the agent is dead after taking action? so should mask next step?)
         # size: batch_size * n
@@ -164,9 +160,11 @@ class Trainer(object):
             alive_masks = torch.cat([torch.zeros(1, n), alive_masks[:-1, :]], dim=0)
         
         alive_masks = alive_masks.view(-1)
+        
+        q_values = values.data
 
         for i in reversed(range(rewards.size(0))):
-            advantages[i] = q_values[i] - values.data[i]
+            advantages[i] = q_values[i]
 
         if self.args.normalize_rewards:
             advantages = (advantages - advantages.mean()) / advantages.std()

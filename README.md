@@ -2,4 +2,4 @@
  
 Actor and critic are two heads in one network.
 
-Fit Q values.
+Use conterfactual baseline. Only test with tarcomm.

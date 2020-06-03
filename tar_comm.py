@@ -5,8 +5,8 @@ from torch import nn
 from models import MLP
 from action_utils import select_action, translate_action
 import numpy as np
-import itertools
-from utils import *
+# import itertools
+# from utils import *
 
 class TarCommNetMLP(nn.Module):
     """
@@ -221,12 +221,13 @@ class TarCommNetMLP(nn.Module):
         critic_in = self.build_q_input(hidden_state, actions)
         value_head = self.value_head(critic_in)
         
-        baseline = self.compute_counterfactual_baseline(hidden_state, actions, action_out)    
+#         baseline = self.compute_counterfactual_baseline(hidden_state, actions, action_out)    
             
         if self.args.recurrent:
-            return action_out, action, value_head, baseline, (hidden_state.clone(), cell_state.clone())
+            # what is the difference between using clone and not using it?
+            return action_out, action, value_head, (hidden_state.clone(), cell_state.clone())
         else:
-            return action_out, action, value_head, baseline
+            return action_out, action, value_head, hidden_state.clone()
 
         
     def build_q_input(self, hidden_state, actions):
@@ -246,42 +247,42 @@ class TarCommNetMLP(nn.Module):
         
         return critic_in
     
-    def compute_counterfactual_baseline(self, hidden_state, actions, action_out):
-        n = self.args.nagents
-        num_actions = self.args.num_actions
-        dim_actions = self.args.dim_actions 
+#     def compute_counterfactual_baseline(self, hidden_state, actions, action_out):
+#         n = self.args.nagents
+#         num_actions = self.args.num_actions
+#         dim_actions = self.args.dim_actions 
         
-        action_index_list = [[j for j in range(num_actions[i])]  for i in range(dim_actions)]
-        # a list of all the possible combinations of differnet action heads 
-        action_index_combo = list(itertools.product(*action_index_list))
+#         action_index_list = [[j for j in range(num_actions[i])]  for i in range(dim_actions)]
+#         # a list of all the possible combinations of differnet action heads 
+#         action_index_combo = list(itertools.product(*action_index_list))
         
-        baseline = []
-        for agent_idx in range(n):
-            # element size: 1 * num_actions[i]
-            log_p_agent = [action_out[i][:, agent_idx, :].view(-1, num_actions[i]) for i in range(dim_actions)]
-            agent_baseline = []
-            for action_combo in action_index_combo:
-                # size: 1 * dim_actions
-                action_combo = torch.Tensor(action_combo).view(-1, dim_actions)
-                action_marginalized = actions.clone()
-                action_marginalized[agent_idx, :] = action_combo
-                # size: 1 * (hid_size + n*sum(num_actions))
-                q_input = self.build_q_input(hidden_state, actions)[agent_idx].unsqueeze(0)
-                # size: 1 * 1
-                agent_q_marginalized = self.value_head(q_input).detach()
-                # size: 1 * dim_actions
-                agent_actions = action_marginalized[agent_idx, :].view(-1, dim_actions)
-                # size: 1 * 1
-                # changing log_prob_agent will not change log_p_agent or action_out
-                log_prob_agent = multinomials_log_density(agent_actions, log_p_agent)
-                agent_baseline.append(agent_q_marginalized * torch.exp(log_prob_agent.clone().detach()))              
-            # size: 1 * 1
-            agent_baseline = torch.cat(agent_baseline, dim=1).sum(dim=1).unsqueeze(dim=-1)
-            baseline.append(agent_baseline)
-        # size: n * 1
-        baseline = torch.cat(baseline, dim=0)
+#         baseline = []
+#         for agent_idx in range(n):
+#             # element size: 1 * num_actions[i]
+#             log_p_agent = [action_out[i][:, agent_idx, :].view(-1, num_actions[i]) for i in range(dim_actions)]
+#             agent_baseline = []
+#             for action_combo in action_index_combo:
+#                 # size: 1 * dim_actions
+#                 action_combo = torch.Tensor(action_combo).view(-1, dim_actions)
+#                 action_marginalized = actions.clone()
+#                 action_marginalized[agent_idx, :] = action_combo
+#                 # size: 1 * (hid_size + n*sum(num_actions))
+#                 q_input = self.build_q_input(hidden_state, actions)[agent_idx].unsqueeze(0)
+#                 # size: 1 * 1
+#                 agent_q_marginalized = self.value_head(q_input).detach()
+#                 # size: 1 * dim_actions
+#                 agent_actions = action_marginalized[agent_idx, :].view(-1, dim_actions)
+#                 # size: 1 * 1
+#                 # changing log_prob_agent will not change log_p_agent or action_out
+#                 log_prob_agent = multinomials_log_density(agent_actions, log_p_agent)
+#                 agent_baseline.append(agent_q_marginalized * torch.exp(log_prob_agent.clone().detach()))              
+#             # size: 1 * 1
+#             agent_baseline = torch.cat(agent_baseline, dim=1).sum(dim=1).unsqueeze(dim=-1)
+#             baseline.append(agent_baseline)
+#         # size: n * 1
+#         baseline = torch.cat(baseline, dim=0)
         
-        return baseline
+#         return baseline
 
         
     def get_agent_mask(self, batch_size, info):

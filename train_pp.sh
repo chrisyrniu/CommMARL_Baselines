@@ -19,7 +19,7 @@ python -u main.py \
   --save \
   --save_every 200 \
   --plot \
-  --plot_env pp_medium_cf_tar_ic3_hid_128_seed0_run1 \
+  --plot_env pp_medium_cf_v1_tar_ic3_hid_128_seed0_run1 \
   --plot_port 8009 \
   | tee train_pp.log
 

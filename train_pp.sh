@@ -12,17 +12,14 @@ python -u main.py \
   --epoch_size 10 \
   --hid_size 128 \
   --detach_gap 10 \
-  --value_coeff 0.3 \
-  --lrate 0.0007 \
-  --normalize_rewards \
+  --lrate 0.001 \
   --ic3net \
   --tarcomm \
   --recurrent \
   --save \
   --save_every 200 \
-  --seed 0 \
   --plot \
-  --plot_env pp_medium_ac_shared_v1_tar_ic3_hid_128_seed0_run1 \
+  --plot_env pp_medium_cf_tar_ic3_hid_128_seed0_run1 \
   --plot_port 8009 \
   | tee train_pp.log
 

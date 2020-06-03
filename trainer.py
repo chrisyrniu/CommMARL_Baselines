@@ -7,7 +7,7 @@ import torch.nn as nn
 from utils import *
 from action_utils import *
 
-Transition = namedtuple('Transition', ('state', 'action', 'action_out', 'value', 'episode_mask', 'episode_mini_mask', 'next_state',
+Transition = namedtuple('Transition', ('state', 'action', 'action_out', 'value', 'baseline', 'episode_mask', 'episode_mini_mask', 'next_state',
                                        'reward', 'misc'))
 
 
@@ -50,7 +50,7 @@ class Trainer(object):
                     prev_hid = self.policy_net.init_hidden(batch_size=state.shape[0])
 
                 x = [state, prev_hid]
-                action_out, action, value, prev_hid = self.policy_net(x, info)
+                action_out, action, value, baseline, prev_hid = self.policy_net(x, info)
 
                 if (t + 1) % self.args.detach_gap == 0:
                     if self.args.rnn_type == 'LSTM':
@@ -59,7 +59,7 @@ class Trainer(object):
                         prev_hid = prev_hid.detach()
             else:
                 x = state
-                action_out, action, value = self.policy_net(x, info)
+                action_out, action, value, baseline = self.policy_net(x, info)
                 
             action, actual = translate_action(self.args, self.env, action)
             next_state, reward, done, info = self.env.step(actual)
@@ -99,7 +99,7 @@ class Trainer(object):
             if should_display:
                 self.env.display()
 
-            trans = Transition(state, action, action_out, value, episode_mask, episode_mini_mask, next_state, reward, misc)
+            trans = Transition(state, action, action_out, value, baseline, episode_mask, episode_mini_mask, next_state, reward, misc)
             episode.append(trans)
             state = next_state
             if done:
@@ -143,6 +143,7 @@ class Trainer(object):
 
         # can't do batch forward.
         values = torch.cat(batch.value, dim=0)
+        baselines = torch.cat(batch.baseline, dim=0)
         action_out = list(zip(*batch.action_out))
         action_out = [torch.cat(a, dim=0) for a in action_out]
 
@@ -151,6 +152,7 @@ class Trainer(object):
 
         advantages = torch.Tensor(batch_size, n)
         values = values.view(batch_size, n)
+        baselines = baselines.view(batch_size, n)
 
         # mask the dead agents (in fact the agent is dead after taking action? so should mask next step?)
         # size: batch_size * n
@@ -161,10 +163,27 @@ class Trainer(object):
         
         alive_masks = alive_masks.view(-1)
         
-        q_values = values.data
+        
+        coop_returns = torch.Tensor(batch_size, n)
+        ncoop_returns = torch.Tensor(batch_size, n)
+        returns = torch.Tensor(batch_size, n)
+        prev_coop_return = 0
+        prev_ncoop_return = 0
+        prev_value = 0
+        prev_advantage = 0
 
         for i in reversed(range(rewards.size(0))):
-            advantages[i] = q_values[i]
+            coop_returns[i] = rewards[i] + self.args.gamma * prev_coop_return * episode_masks[i]
+            ncoop_returns[i] = rewards[i] + self.args.gamma * prev_ncoop_return * episode_masks[i] * episode_mini_masks[i]
+
+            prev_coop_return = coop_returns[i].clone()
+            prev_ncoop_return = ncoop_returns[i].clone()
+
+            returns[i] = (self.args.mean_ratio * coop_returns[i].mean()) \
+                        + ((1 - self.args.mean_ratio) * ncoop_returns[i])  
+
+        for i in reversed(range(rewards.size(0))):
+            advantages[i] = returns[i] - baselines[i]
 
         if self.args.normalize_rewards:
             advantages = (advantages - advantages.mean()) / advantages.std()
@@ -190,25 +209,7 @@ class Trainer(object):
 
         action_loss = action_loss.sum()
         stat['action_loss'] = action_loss.item()
-
-        
-        coop_returns = torch.Tensor(batch_size, n)
-        ncoop_returns = torch.Tensor(batch_size, n)
-        returns = torch.Tensor(batch_size, n)
-        prev_coop_return = 0
-        prev_ncoop_return = 0
-        prev_value = 0
-        prev_advantage = 0
-
-        for i in reversed(range(rewards.size(0))):
-            coop_returns[i] = rewards[i] + self.args.gamma * prev_coop_return * episode_masks[i]
-            ncoop_returns[i] = rewards[i] + self.args.gamma * prev_ncoop_return * episode_masks[i] * episode_mini_masks[i]
-
-            prev_coop_return = coop_returns[i].clone()
-            prev_ncoop_return = ncoop_returns[i].clone()
-
-            returns[i] = (self.args.mean_ratio * coop_returns[i].mean()) \
-                        + ((1 - self.args.mean_ratio) * ncoop_returns[i])        
+      
         
         # value loss term
         targets = returns

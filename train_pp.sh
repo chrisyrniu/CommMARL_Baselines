@@ -3,25 +3,31 @@ export OMP_NUM_THREADS=1
 
 python -u main.py \
   --env_name predator_prey \
-  --nagents 5 \
-  --dim 10 \
-  --max_steps 40 \
-  --vision 1 \
+  --nagents 3 \
+  --dim 5 \
+  --max_steps 20 \
+  --vision 0 \
   --nprocesses 4 \
   --num_epochs 1000 \
   --epoch_size 10 \
   --hid_size 128 \
+  --value_hid_size 32 \
+  --value_coeff 0.01 \
   --detach_gap 10 \
   --lrate 0.001 \
   --ic3net \
   --tarcomm \
   --recurrent \
+  --seed 0 \
   --save \
-  --save_every 200 \
+  --save_every 500 \
   --plot \
-  --plot_env pp_medium_cf_v1_tar_ic3_hid_128_seed0_run1 \
+  --plot_env pp_easy_cf_v1_tar_ic3_hid_128_seed0_run8 \
   --plot_port 8009 \
   | tee train_pp.log
+  
+#   --save \
+#   --save_every 500 \
 
 #   --plot \
 #   --plot_env pp_medium_gacomm_individual_rew_hid_128_seed3780 \

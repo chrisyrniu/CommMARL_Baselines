@@ -30,6 +30,7 @@ class TarCommNetMLP(nn.Module):
         self.comm_passes = args.comm_passes
         self.recurrent = args.recurrent
         self.qk_hid_size = args.qk_hid_size
+        self.value_hid_size = args.value_hid_size
 
         self.continuous = args.continuous
         if self.continuous:
@@ -74,13 +75,12 @@ class TarCommNetMLP(nn.Module):
         # Our main function for converting current hidden state to next state
         # self.f = nn.Linear(args.hid_size, args.hid_size)
         if args.share_weights:
-            self.C_module = nn.Linear(args.hid_size, args.hid_size)
+            self.C_module = nn.Linear(args.value_hid_size, args.hid_size)
             self.C_modules = nn.ModuleList([self.C_module
                                             for _ in range(self.comm_passes)])
         else:
-            self.C_modules = nn.ModuleList([nn.Linear(args.hid_size, args.hid_size)
+            self.C_modules = nn.ModuleList([nn.Linear(args.value_hid_size, args.hid_size)
                                             for _ in range(self.comm_passes)])
-        # self.C = nn.Linear(args.hid_size, args.hid_size)
 
         # initialise weights as 0
         if args.comm_init == 'zeros':
@@ -146,31 +146,20 @@ class TarCommNetMLP(nn.Module):
         agent_mask_transpose = agent_mask.transpose(1, 2)
 
         for i in range(self.comm_passes):
-            # Choose current or prev depending on recurrent
-            comm = hidden_state.view(batch_size, n, self.hid_size) if self.args.recurrent else hidden_state
-
-            # Get the next communication vector based on next hidden state
-            comm = comm.unsqueeze(-2).expand(-1, n, n, self.hid_size)
-
-            # Create mask for masking self communication
-            mask = self.comm_mask.view(1, n, n)
-            mask = mask.expand(comm.shape[0], n, n)
-            mask = mask.unsqueeze(-1)
-
-            mask = mask.expand_as(comm)
-            comm = comm * mask
-
-            if hasattr(self.args, 'comm_mode') and self.args.comm_mode == 'avg' \
-                and num_agents_alive > 1:
-                comm = comm / (num_agents_alive - 1)
 
             # calculate for soft attention
             q = self.wq(hidden_state)
             k = self.wk(hidden_state)
+            v = self.wv(hidden_state)
             soft_attn = F.softmax(torch.matmul(q, k.transpose(0, 1)) / np.sqrt(self.qk_hid_size), dim=1)
-            soft_attn = soft_attn.unsqueeze(-1).expand(n, n, self.hid_size)
-            soft_attn = soft_attn.unsqueeze(0).expand(batch_size, n, n, self.hid_size)
-
+            soft_attn = soft_attn.unsqueeze(-1).expand(n, n, self.value_hid_size)
+            soft_attn = soft_attn.unsqueeze(0).expand(batch_size, n, n, self.value_hid_size)
+            
+            # Choose current or prev depending on recurrent
+            comm = v.view(batch_size, n, self.value_hid_size) if self.args.recurrent else v
+            # Get the next communication vector based on next hidden state
+            comm = comm.unsqueeze(-2).expand(-1, n, n, self.value_hid_size)
+            
             # Mask comm_in
             # Mask communcation from dead agents
             comm = comm * agent_mask
@@ -180,7 +169,6 @@ class TarCommNetMLP(nn.Module):
             # Combine all of C_j for an ith agent which essentially are h_j
             comm_sum = (comm * soft_attn.transpose(1, 2)).sum(dim=1)
             c = self.C_modules[i](comm_sum)
-
 
             if self.args.recurrent:
                 # skip connection - combine comm. matrix and encoded input for all agents

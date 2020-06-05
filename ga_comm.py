@@ -84,7 +84,7 @@ class GACommNetMLP(nn.Module):
         # hard attention layers to form the graph 
         self.lstm = nn.LSTM(args.hid_size * 2, args.hid_size * 2, bidirectional=True)
         self.linear = nn.Linear(args.hid_size * 4, 2) # *4: after bidirectional output
-        # soft attention layers 
+        # soft attention layers, no value transformation in the paper
         self.wq = nn.Linear(args.hid_size, args.qk_hid_size)
         self.wk = nn.Linear(args.hid_size, args.qk_hid_size)
 

@@ -7,7 +7,7 @@ python -u main.py \
   --dim 10 \
   --max_steps 40 \
   --vision 1 \
-  --nprocesses 4 \
+  --nprocesses 1 \
   --num_epochs 1000 \
   --epoch_size 10 \
   --hid_size 128 \
@@ -15,19 +15,17 @@ python -u main.py \
   --lrate 0.001 \
   --gcomm \
   --gnn_type gat \
-  --directed \
   --recurrent \
-  --save \
-  --save_every 200 \
   --seed 0 \
-  --plot \
-  --plot_env pp_medium_gcomm_gat_hid_128_seed0_run2 \
-  --plot_port 8097 \
   | tee train_pp.log
 
+
 #   --plot \
-#   --plot_env pp_medium_gacomm_individual_rew_hid_128_seed3780 \
-#   --plot_port 8009 \
+#   --plot_env pp_medium_gcomm_gat_hid_128_seed0_run11 \
+#   --plot_port 8097 \
+
+#   --save \
+#   --save_every 200 \
 
   ## easy
   # --nagents 3 \

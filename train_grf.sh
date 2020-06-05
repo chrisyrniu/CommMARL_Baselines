@@ -16,15 +16,15 @@ python -u main.py \
   --directed \
   --recurrent \
   --save \
-  --save_every 50 \
+  --save_every 200 \
   --scenario academy_3_vs_1_with_keeper \
   --num_controlled_lagents 3 \
   --num_controlled_ragents 0 \
   --reward_type scoring \
   --seed 0 \
   --plot \
-  --plot_env grf_gcomm_gcn_scoring_hid_128_adv_0_seed0 \
-  --plot_port 8009 \
+  --plot_env grf_gcomm_gcn_scoring_hid_128_adv_0_seed0_run1 \
+  --plot_port 8097 \
   | tee train_grf.log
 
 #  --render \

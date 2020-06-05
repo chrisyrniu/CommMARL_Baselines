@@ -22,11 +22,14 @@ class GCommNetMLP(nn.Module):
         self.recurrent = args.recurrent
         
         if args.gnn_type == 'gat':
-            self.gconv1 = GATConv(args.hid_size, int(args.hid_size/4), heads=4, concat=True, dropout=0.2)
-            self.gconv2 = GATConv(args.hid_size, args.hid_size, heads=1, concat=True, dropout=0.2)
+#             self.gconv1 = GATConv(args.hid_size, int(args.hid_size/4), heads=4, concat=True, dropout=0)
+#             self.gconv2 = GATConv(args.hid_size, int(args.hid_size/4), heads=4, concat=True, dropout=0)
+#             self.gconv3 = GATConv(args.hid_size, args.hid_size, heads=1, concat=True, dropout=0)
+            self.gconv = GATConv(args.hid_size, args.hid_size, heads=8, concat=False, dropout=0)
         if args.gnn_type == 'gcn':
             self.gconv1 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
-            self.gconv2 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)             
+            self.gconv2 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
+            self.gconv3 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
         
         self.hard_attn1 = nn.Sequential(
             nn.Linear(self.hid_size*2, int(self.hid_size/2)),
@@ -185,12 +188,27 @@ class GCommNetMLP(nn.Module):
 
             # Mask communcation from dead agents
             comm = comm * agent_mask
-
-            edge_index1 = self.get_edge_index(self.hard_attn1, hidden_state, agent_mask, self.args.directed)
-            comm = F.relu(self.gconv1(comm, edge_index1))
-            edge_index2 = self.get_edge_index(self.hard_attn2, comm, agent_mask, self.args.directed)
-            comm = self.gconv2(comm, edge_index2)
             
+            # Construct the edge index of a complete graph
+#             nodes1 = np.arange(n)
+#             nodes1 = nodes1.repeat(n - 1)
+#             nodes2 = []
+#             for a in range(n):
+#                 p = []
+#                 for b in range(n):
+#                     if b != a:
+#                         p.append(b)
+#                 nodes2 += p
+#             edge_index = torch.tensor(np.stack((nodes1, np.array(nodes2)), axis=0)).long()
+
+            # should make sure that edge_index will be in backprop
+            edge_index1 = self.get_edge_index(self.hard_attn1, hidden_state, agent_mask, self.args.directed)
+            comm = self.gconv(comm, edge_index1)
+#             comm = F.relu(self.gconv1(comm, edge_index1))
+#             edge_index2 = self.get_edge_index(self.hard_attn2, comm, agent_mask, self.args.directed)
+#             comm = self.gconv3(comm, edge_index2)
+    
+#             print(edge_index1.is_leaf)
             # Mask communication to dead agents
             comm = comm * agent_mask
             c = self.C_modules[i](comm)
@@ -255,20 +273,22 @@ class GCommNetMLP(nn.Module):
         hard_attn_output = hard_attn_model(hard_attn_input)
         hard_attn_output = F.gumbel_softmax(hard_attn_output, hard=True)
         # size: len(complete_edges) * 1
-        hard_attn_output = torch.narrow(hard_attn_output, 1, 1, 1)
-
-        idx_edge_index = hard_attn_output.squeeze().tolist()
-        idx_edge_index = np.array(idx_edge_index)
-        idx_edge_index = np.where(idx_edge_index==1)
-        idx_edge_index = idx_edge_index[0]
+        hard_attn_output = torch.narrow(hard_attn_output, 1, 1, 1).squeeze()
         
+        # the problem is that idx_edge_index cannot be in backprop
+#         print('h', hard_attn_output)
+        idx_edge_index = hard_attn_output.nonzero().squeeze()
+#         print('a', idx_edge_index)
         complete_edges = torch.tensor(complete_edges, dtype=torch.long)
         edge_index = complete_edges[idx_edge_index]
         edge_index = edge_index.transpose(0, 1)
-        
+#         print('b', edge_index)
+#         print('c', complete_edges)
         if not directed:
             edge_index_reverse = torch.stack([edge_index[1], edge_index[0]])
             edge_index = torch.cat([edge_index, edge_index_reverse], dim=1)
+            
+#         print(edge_index)
         
         return edge_index
             

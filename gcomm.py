@@ -281,7 +281,7 @@ class GCommNetMLP(nn.Module):
 #         print('a', idx_edge_index)
         complete_edges = torch.tensor(complete_edges, dtype=torch.long)
         edge_index = complete_edges[idx_edge_index]
-        edge_index = edge_index.transpose(0, 1)
+        edge_index = edge_index.view(-1, 2).transpose(0, 1)
 #         print('b', edge_index)
 #         print('c', complete_edges)
         if not directed:

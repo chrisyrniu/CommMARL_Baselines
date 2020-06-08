@@ -262,11 +262,11 @@ class GCommNetMLP(nn.Module):
         agent_mask_transpose = agent_mask.transpose(0, 1)
         # adj size: n * n
         adj = hard_attn_output.squeeze() * agent_mask * agent_mask_transpose
-        
+
         if not self_loop:
             self_loop_mask = torch.ones(n, n) - torch.eye(n, n)
             adj = adj * self_loop_mask 
-            
+
         return adj
         
             

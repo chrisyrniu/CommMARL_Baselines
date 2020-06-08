@@ -50,6 +50,8 @@ parser.add_argument('--recurrent', action='store_true', default=False,
                     help='make the model recurrent in time')
 parser.add_argument('--directed', action='store_true', default=False,
                     help='if the graph formed by the agents is directed')
+parser.add_argument('--self_loop', action='store_true', default=False,
+                    help='if self loop in gnn')
 parser.add_argument('--gnn_type', default='gat', type=str,
                     help='type of gnn to use (gcn|gat)')
 # optimization

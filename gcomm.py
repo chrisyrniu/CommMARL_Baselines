@@ -4,13 +4,11 @@ Revised from CommNetMLP
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch_geometric.nn import GATConv
-from torch_geometric.nn import GCNConv
 import numpy as np
 import itertools
-
 from models import MLP
 from action_utils import select_action, translate_action
+from gnn_layers import GraphAttention
 
 class GCommNetMLP(nn.Module):
     def __init__(self, args, num_inputs):
@@ -21,15 +19,21 @@ class GCommNetMLP(nn.Module):
         self.comm_passes = args.comm_passes
         self.recurrent = args.recurrent
         
+        dropout = 0
+        negative_slope = 0.2
+        nheads = 4
+        
         if args.gnn_type == 'gat':
-#             self.gconv1 = GATConv(args.hid_size, int(args.hid_size/4), heads=4, concat=True, dropout=0)
-#             self.gconv2 = GATConv(args.hid_size, int(args.hid_size/4), heads=4, concat=True, dropout=0)
-#             self.gconv3 = GATConv(args.hid_size, args.hid_size, heads=1, concat=True, dropout=0)
-            self.gconv = GATConv(args.hid_size, args.hid_size, heads=8, concat=False, dropout=0)
-        if args.gnn_type == 'gcn':
-            self.gconv1 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
-            self.gconv2 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
-            self.gconv3 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
+            self.gconv1 = [GraphAttention(args.hid_size, int(args.hid_size/4), dropout=dropout, negative_slope=negative_slope, concat=True) for _ in range(nheads)]
+            for i, attention in enumerate(self.gconv1):
+                self.add_module('attention_{}'.format(i), attention)
+            self.gconv2 = GraphAttention(args.hid_size, args.hid_size, dropout=dropout, negative_slope=negative_slope, concat=False)
+            
+            
+#         if args.gnn_type == 'gcn':
+#             self.gconv1 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
+#             self.gconv2 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
+#             self.gconv3 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
         
         self.hard_attn1 = nn.Sequential(
             nn.Linear(self.hid_size*2, int(self.hid_size/2)),
@@ -166,13 +170,6 @@ class GCommNetMLP(nn.Module):
                 v: value head
         """
 
-        # if self.args.env_name == 'starcraft':
-        #     maxi = x.max(dim=-2)[0]
-        #     x = self.state_encoder(x)
-        #     x = x.sum(dim=-2)
-        #     x = torch.cat([x, maxi], dim=-1)
-        #     x = self.tanh(x)
-
         x, hidden_state, cell_state = self.forward_state_encoder(x)
 
         batch_size = x.size()[0]
@@ -189,26 +186,15 @@ class GCommNetMLP(nn.Module):
             # Mask communcation from dead agents
             comm = comm * agent_mask
             
-            # Construct the edge index of a complete graph
-#             nodes1 = np.arange(n)
-#             nodes1 = nodes1.repeat(n - 1)
-#             nodes2 = []
-#             for a in range(n):
-#                 p = []
-#                 for b in range(n):
-#                     if b != a:
-#                         p.append(b)
-#                 nodes2 += p
-#             edge_index = torch.tensor(np.stack((nodes1, np.array(nodes2)), axis=0)).long()
+            # should make sure that adj will be in backprop
+            adj = self.get_adj_matrix(self.hard_attn1, hidden_state, agent_mask, self.args.directed, self.args.self_loop)
+            
+#             adj = torch.ones(n, n)
 
-            # should make sure that edge_index will be in backprop
-            edge_index1 = self.get_edge_index(self.hard_attn1, hidden_state, agent_mask, self.args.directed)
-            comm = self.gconv(comm, edge_index1)
-#             comm = F.relu(self.gconv1(comm, edge_index1))
-#             edge_index2 = self.get_edge_index(self.hard_attn2, comm, agent_mask, self.args.directed)
-#             comm = self.gconv3(comm, edge_index2)
-    
-#             print(edge_index1.is_leaf)
+            if self.args.gnn_type == 'gat':
+                comm = torch.cat([att(comm, adj) for att in self.gconv1], dim=1)
+                comm = self.gconv2(comm, adj)
+        
             # Mask communication to dead agents
             comm = comm * agent_mask
             c = self.C_modules[i](comm)
@@ -258,39 +244,31 @@ class GCommNetMLP(nn.Module):
         return tuple(( torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True),
                        torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True)))
     
-    def get_edge_index(self, hard_attn_model, hidden_state, agent_mask, directed=True):
-        # no self-loop here, self-loop will be added in the GNN part
-        alive_idx = (agent_mask.squeeze()==1).nonzero().squeeze().tolist()
+    
+    def get_adj_matrix(self, hard_attn_model, hidden_state, agent_mask, directed=True, self_loop=True):
+        # hidden_state size: n * hid_size
+        n = self.args.nagents
+        # hard_attn_input size: n * n * (2*hid_size)
+        hard_attn_input = torch.cat([hidden_state.repeat(1, n).view(n * n, -1), hidden_state.repeat(n, 1)], dim=1).view(n, -1, 2 * self.hid_size)
+        # hard_attn_output size: n * n * 2
         if directed:
-            complete_edges = list(itertools.permutations(alive_idx, r=2))
+            hard_attn_output = F.gumbel_softmax(hard_attn_model(hard_attn_input), hard=True)
         else:
-            complete_edges = list(itertools.combinations(alive_idx, r=2))
-            
-        hard_attn_input = [torch.cat([hidden_state[complete_edges[i][0]], hidden_state[complete_edges[i][1]]]) for i in range(len(complete_edges))]
-        # size: len(complete_edges) * (hid_size*2)
-        hard_attn_input = torch.stack(hard_attn_input)
-        # size: len(complete_edges) * 2
-        hard_attn_output = hard_attn_model(hard_attn_input)
-        hard_attn_output = F.gumbel_softmax(hard_attn_output, hard=True)
-        # size: len(complete_edges) * 1
-        hard_attn_output = torch.narrow(hard_attn_output, 1, 1, 1).squeeze()
+            hard_attn_output = F.gumbel_softmax(0.5*hard_attn_model(hard_attn_input)+0.5*hard_attn_model(hard_attn_input.permute(1,0,2)), hard=True)
+        # hard_attn_output size: n * n * 1
+        hard_attn_output = torch.narrow(hard_attn_output, 2, 1, 1)
+        # agent_mask and its transpose size: n * n
+        agent_mask = agent_mask.expand(n, n)
+        agent_mask_transpose = agent_mask.transpose(0, 1)
+        # adj size: n * n
+        adj = hard_attn_output.squeeze() * agent_mask * agent_mask_transpose
         
-        # the problem is that idx_edge_index cannot be in backprop
-#         print('h', hard_attn_output)
-        idx_edge_index = hard_attn_output.nonzero().squeeze()
-#         print('a', idx_edge_index)
-        complete_edges = torch.tensor(complete_edges, dtype=torch.long)
-        edge_index = complete_edges[idx_edge_index]
-        edge_index = edge_index.transpose(0, 1)
-#         print('b', edge_index)
-#         print('c', complete_edges)
-        if not directed:
-            edge_index_reverse = torch.stack([edge_index[1], edge_index[0]])
-            edge_index = torch.cat([edge_index, edge_index_reverse], dim=1)
+        if not self_loop:
+            self_loop_mask = torch.ones(n, n) - torch.eye(n, n)
+            adj = adj * self_loop_mask 
             
-#         print(edge_index)
+        return adj
         
-        return edge_index
             
         
 

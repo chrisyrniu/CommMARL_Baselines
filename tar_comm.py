@@ -52,9 +52,6 @@ class TarCommNetMLP(nn.Module):
         # initial environment stage
         self.encoder = nn.Linear(num_inputs, args.hid_size)
 
-        # if self.args.env_name == 'starcraft':
-        #     self.state_encoder = nn.Linear(num_inputs, num_inputs)
-        #     self.encoder = nn.Linear(num_inputs * 2, args.hid_size)
         if args.recurrent:
             self.hidd_encoder = nn.Linear(args.hid_size, args.hid_size)
 
@@ -70,8 +67,7 @@ class TarCommNetMLP(nn.Module):
             else:
                 self.f_modules = nn.ModuleList([nn.Linear(args.hid_size, args.hid_size)
                                                 for _ in range(self.comm_passes)])
-        # else:
-            # raise RuntimeError("Unsupported RNN type.")
+
 
         # Our main function for converting current hidden state to next state
         # self.f = nn.Linear(args.hid_size, args.hid_size)
@@ -89,11 +85,6 @@ class TarCommNetMLP(nn.Module):
             for i in range(self.comm_passes):
                 self.C_modules[i].weight.data.zero_()
         self.tanh = nn.Tanh()
-
-        # print(self.C)
-        # self.C.weight.data.zero_()
-        # Init weights for linear layers
-        # self.apply(self.init_weights)
 
         self.value_head = nn.Linear(self.hid_size, 1)
 
@@ -159,13 +150,6 @@ class TarCommNetMLP(nn.Module):
                 case of discrete, mean and std in case of continuous)
                 v: value head
         """
-
-        # if self.args.env_name == 'starcraft':
-        #     maxi = x.max(dim=-2)[0]
-        #     x = self.state_encoder(x)
-        #     x = x.sum(dim=-2)
-        #     x = torch.cat([x, maxi], dim=-1)
-        #     x = self.tanh(x)
 
         x, hidden_state, cell_state = self.forward_state_encoder(x)
 

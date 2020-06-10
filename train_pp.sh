@@ -22,7 +22,7 @@ python -u main.py \
   --recurrent \
   --seed 0 \
   --plot \
-  --plot_env pp_medium_new_gcomm_gat_hid_128_seed0_run1 \
+  --plot_env pp_medium_new_gcomm_gat_hid_128_seed0_run6 \
   --plot_port 8097 \
   | tee train_pp.log
 

@@ -19,7 +19,7 @@ class GCommNetMLP(nn.Module):
         self.comm_passes = args.comm_passes
         self.recurrent = args.recurrent
         
-        dropout = 0
+        dropout = 0.2
         negative_slope = 0.2
         nheads = 4
         
@@ -41,13 +41,15 @@ class GCommNetMLP(nn.Module):
             nn.Linear(int(self.hid_size/2), int(self.hid_size/8)),
             nn.ReLU(),
             nn.Linear(int(self.hid_size/8), 2))
+        
+#         self.hard_attn1.apply(self.init_linear)
 
-        self.hard_attn2 = nn.Sequential(
-            nn.Linear(self.hid_size*2, int(self.hid_size/2)),
-            nn.ReLU(),
-            nn.Linear(int(self.hid_size/2), int(self.hid_size/8)),
-            nn.ReLU(),
-            nn.Linear(int(self.hid_size/8), 2))
+#         self.hard_attn2 = nn.Sequential(
+#             nn.Linear(self.hid_size*2, int(self.hid_size/2)),
+#             nn.ReLU(),
+#             nn.Linear(int(self.hid_size/2), int(self.hid_size/8)),
+#             nn.ReLU(),
+#             nn.Linear(int(self.hid_size/8), 2))
         
         self.continuous = args.continuous
         if self.continuous:
@@ -103,7 +105,6 @@ class GCommNetMLP(nn.Module):
         else:
             self.C_modules = nn.ModuleList([nn.Linear(args.hid_size, args.hid_size)
                                             for _ in range(self.comm_passes)])
-        # self.C = nn.Linear(args.hid_size, args.hid_size)
 
         # initialise weights as 0
         if args.comm_init == 'zeros':
@@ -187,9 +188,10 @@ class GCommNetMLP(nn.Module):
             comm = comm * agent_mask
             
             # should make sure that adj will be in backprop
-            adj = self.get_adj_matrix(self.hard_attn1, hidden_state, agent_mask, self.args.directed, self.args.self_loop)
+#             adj = self.get_adj_matrix(self.hard_attn1, hidden_state, agent_mask, self.args.directed, self.args.self_loop)
+#             print(adj)
             
-#             adj = torch.ones(n, n)
+            adj = torch.ones(n, n)
 
             if self.args.gnn_type == 'gat':
                 comm = torch.cat([att(comm, adj) for att in self.gconv1], dim=1)
@@ -235,10 +237,12 @@ class GCommNetMLP(nn.Module):
         else:
             return action, value_head
 
-    def init_weights(self, m):
+    def init_linear(self, m):
         if type(m) == nn.Linear:
-            m.weight.data.normal_(0, self.init_std)
-
+#             m.weight.data.normal_(0, self.init_std)
+            m.weight.data.fill_(0.)
+            m.bias.data.fill_(0.)
+        
     def init_hidden(self, batch_size):
         # dim 0 = num of layers * num of direction
         return tuple(( torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True),

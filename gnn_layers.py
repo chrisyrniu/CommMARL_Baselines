@@ -47,20 +47,28 @@ class GraphAttention(nn.Module):
     Simple GAT layer, similar to https://arxiv.org/abs/1710.10903
     """
 
-    def __init__(self, in_features, out_features, dropout, negative_slope, concat=True):
+    def __init__(self, in_features, out_features, dropout, negative_slope, bias=True):
         super(GraphAttention, self).__init__()
         self.dropout = dropout
         self.in_features = in_features
         self.out_features = out_features
         self.negative_slope = negative_slope
-        self.concat = concat
 
         self.W = nn.Parameter(torch.zeros(size=(in_features, out_features)))
-        nn.init.xavier_uniform_(self.W.data, gain=nn.init.calculate_gain('relu'))
         self.a = nn.Parameter(torch.zeros(size=(2*out_features, 1)))
-        nn.init.xavier_uniform_(self.a.data, gain=nn.init.calculate_gain('relu'))
-
+        if bias:
+            self.bias = nn.Parameter(torch.FloatTensor(out_features))
+        else:
+            self.register_parameter('bias', None)
         self.leakyrelu = nn.LeakyReLU(self.negative_slope)
+        
+        self.reset_parameters()
+        
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.W.data, gain=nn.init.calculate_gain('relu'))
+        nn.init.xavier_uniform_(self.a.data, gain=nn.init.calculate_gain('relu'))
+        if self.bias is not None:
+            nn.init.zeros_(self.bias.data)
 
     def forward(self, input, adj):
         h = torch.mm(input, self.W)
@@ -74,11 +82,11 @@ class GraphAttention(nn.Module):
         attention = F.softmax(attention, dim=1)
         attention = F.dropout(attention, self.dropout, training=self.training)
         h_prime = torch.matmul(attention, h)
+        
+        if self.bias is not None:
+            h_prime += self.bias
 
-        if self.concat:
-            return F.elu(h_prime)
-        else:
-            return h_prime
+        return h_prime
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' + str(self.in_features) + ' -> ' + str(self.out_features) + ')'

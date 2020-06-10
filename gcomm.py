@@ -24,10 +24,10 @@ class GCommNetMLP(nn.Module):
         nheads = 4
         
         if args.gnn_type == 'gat':
-            self.gconv1 = [GraphAttention(args.hid_size, int(args.hid_size/4), dropout=dropout, negative_slope=negative_slope, concat=True) for _ in range(nheads)]
+            self.gconv1 = [GraphAttention(args.hid_size, int(args.hid_size/nheads), dropout=dropout, negative_slope=negative_slope) for _ in range(nheads)]
             for i, attention in enumerate(self.gconv1):
                 self.add_module('attention_{}'.format(i), attention)
-            self.gconv2 = GraphAttention(args.hid_size, args.hid_size, dropout=dropout, negative_slope=negative_slope, concat=False)
+            self.gconv2 = GraphAttention(args.hid_size, args.hid_size, dropout=dropout, negative_slope=negative_slope)
             
             
 #         if args.gnn_type == 'gcn':
@@ -195,6 +195,7 @@ class GCommNetMLP(nn.Module):
 
             if self.args.gnn_type == 'gat':
                 comm = torch.cat([att(comm, adj) for att in self.gconv1], dim=1)
+                comm = F.elu(comm)
                 comm = self.gconv2(comm, adj)
         
             # Mask communication to dead agents

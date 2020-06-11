@@ -12,7 +12,7 @@ python -u main.py \
   --epoch_size 10 \
   --hid_size 128 \
   --value_hid_size 32 \
-  --value_coeff 0.01 \
+  --value_coeff 0.03 \
   --detach_gap 10 \
   --lrate 0.001 \
   --gcomm \
@@ -22,7 +22,7 @@ python -u main.py \
   --recurrent \
   --seed 0 \
   --plot \
-  --plot_env pp_medium_new_gcomm_gat_hid_128_seed0_run6 \
+  --plot_env pp_medium_new_gcomm_gat_hid_128_seed0_run9 \
   --plot_port 8097 \
   | tee train_pp.log
 

@@ -24,10 +24,8 @@ class GCommNetMLP(nn.Module):
         nheads = 4
         
         if args.gnn_type == 'gat':
-            self.gconv1 = [GraphAttention(args.hid_size, int(args.hid_size/nheads), dropout=dropout, negative_slope=negative_slope) for _ in range(nheads)]
-            for i, attention in enumerate(self.gconv1):
-                self.add_module('attention_{}'.format(i), attention)
-            self.gconv2 = GraphAttention(args.hid_size, args.hid_size, dropout=dropout, negative_slope=negative_slope)
+            self.gconv1 = GraphAttention(args.hid_size, int(args.hid_size/nheads), dropout=dropout, negative_slope=negative_slope, num_heads=nheads)
+            self.gconv2 = GraphAttention(args.hid_size, args.hid_size, dropout=dropout, negative_slope=negative_slope, num_heads=1)
             
             
 #         if args.gnn_type == 'gcn':
@@ -188,14 +186,13 @@ class GCommNetMLP(nn.Module):
             comm = comm * agent_mask
             
             # should make sure that adj will be in backprop
-#             adj = self.get_adj_matrix(self.hard_attn1, hidden_state, agent_mask, self.args.directed, self.args.self_loop)
+            adj = self.get_adj_matrix(self.hard_attn1, hidden_state, agent_mask, self.args.directed, self.args.self_loop)
 #             print(adj)
             
-            adj = torch.ones(n, n)
+#             adj = torch.ones(n, n)
 
             if self.args.gnn_type == 'gat':
-                comm = torch.cat([att(comm, adj) for att in self.gconv1], dim=1)
-                comm = F.elu(comm)
+                comm = F.elu(self.gconv1(comm, adj))
                 comm = self.gconv2(comm, adj)
         
             # Mask communication to dead agents

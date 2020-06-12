@@ -81,7 +81,7 @@ class GCommNetMLP(nn.Module):
 
         if args.recurrent:
             self.init_hidden(args.batch_size)
-            self.f_module = nn.LSTMCell(args.hid_size, args.hid_size)
+            self.f_module = nn.LSTMCell(2 * args.hid_size, args.hid_size)
 
         else:
             if args.share_weights:
@@ -202,7 +202,7 @@ class GCommNetMLP(nn.Module):
             if self.args.recurrent:
                 # skip connection - combine comm. matrix and encoded input for all agents
                 x = x.squeeze()
-                inp = x + c
+                inp = torch.cat((x, c), dim=-1)
                 
                 output = self.f_module(inp, (hidden_state, cell_state))
 

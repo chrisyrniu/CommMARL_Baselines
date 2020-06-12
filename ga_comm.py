@@ -178,6 +178,7 @@ class GACommNetMLP(nn.Module):
             else: # MLP|RNN
                 # Get next hidden state from f node
                 # and Add skip connection from start and sum them
+                # bugs to be fixed 
                 hidden_state = sum([x, self.f_modules[i](hidden_state), c])
                 hidden_state = self.tanh(hidden_state)
 

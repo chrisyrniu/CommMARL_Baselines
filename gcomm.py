@@ -19,7 +19,7 @@ class GCommNetMLP(nn.Module):
         self.comm_passes = args.comm_passes
         self.recurrent = args.recurrent
         
-        dropout = 0.2
+        dropout = 0
         negative_slope = 0.2
         nheads = 4
         

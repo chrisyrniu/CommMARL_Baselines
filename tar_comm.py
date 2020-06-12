@@ -1,10 +1,11 @@
+import math
+
 import torch
 import torch.nn.functional as F
 from torch import nn
 
 from models import MLP
 from action_utils import select_action, translate_action
-import numpy as np
 
 class TarCommNetMLP(nn.Module):
     """
@@ -27,7 +28,6 @@ class TarCommNetMLP(nn.Module):
         self.hid_size = args.hid_size
         self.comm_passes = args.comm_passes
         self.recurrent = args.recurrent
-        self.qk_hid_size = args.qk_hid_size
 
         self.continuous = args.continuous
         if self.continuous:
@@ -52,6 +52,9 @@ class TarCommNetMLP(nn.Module):
         # initial environment stage
         self.encoder = nn.Linear(num_inputs, args.hid_size)
 
+        # if self.args.env_name == 'starcraft':
+        #     self.state_encoder = nn.Linear(num_inputs, num_inputs)
+        #     self.encoder = nn.Linear(num_inputs * 2, args.hid_size)
         if args.recurrent:
             self.hidd_encoder = nn.Linear(args.hid_size, args.hid_size)
 
@@ -67,7 +70,8 @@ class TarCommNetMLP(nn.Module):
             else:
                 self.f_modules = nn.ModuleList([nn.Linear(args.hid_size, args.hid_size)
                                                 for _ in range(self.comm_passes)])
-
+        # else:
+            # raise RuntimeError("Unsupported RNN type.")
 
         # Our main function for converting current hidden state to next state
         # self.f = nn.Linear(args.hid_size, args.hid_size)
@@ -86,12 +90,20 @@ class TarCommNetMLP(nn.Module):
                 self.C_modules[i].weight.data.zero_()
         self.tanh = nn.Tanh()
 
+        # print(self.C)
+        # self.C.weight.data.zero_()
+        # Init weights for linear layers
+        # self.apply(self.init_weights)
+
         self.value_head = nn.Linear(self.hid_size, 1)
 
-        # soft attention layers 
-        self.wq = nn.Linear(args.hid_size, args.qk_hid_size)
-        self.wk = nn.Linear(args.hid_size, args.qk_hid_size)
-        self.wv = nn.Linear(args.hid_size, args.value_hid_size)
+        ######################################################
+        # [TarMAC changeset] Attentional communication modules
+        ######################################################
+
+        self.state2query = nn.Linear(args.hid_size, 16)
+        self.state2key = nn.Linear(args.hid_size, 16)
+        self.state2value = nn.Linear(args.hid_size, args.hid_size)
 
 
     def get_agent_mask(self, batch_size, info):
@@ -103,7 +115,6 @@ class TarCommNetMLP(nn.Module):
         else:
             agent_mask = torch.ones(n)
             num_agents_alive = n
-
         agent_mask = agent_mask.view(1, 1, n)
         agent_mask = agent_mask.expand(batch_size, n, n).unsqueeze(-1).clone()
 
@@ -151,6 +162,13 @@ class TarCommNetMLP(nn.Module):
                 v: value head
         """
 
+        # if self.args.env_name == 'starcraft':
+        #     maxi = x.max(dim=-2)[0]
+        #     x = self.state_encoder(x)
+        #     x = x.sum(dim=-2)
+        #     x = torch.cat([x, maxi], dim=-1)
+        #     x = self.tanh(x)
+
         x, hidden_state, cell_state = self.forward_state_encoder(x)
 
         batch_size = x.size()[0]
@@ -168,30 +186,75 @@ class TarCommNetMLP(nn.Module):
         agent_mask_transpose = agent_mask.transpose(1, 2)
 
         for i in range(self.comm_passes):
-
-            # calculate for soft attention
-            q = self.wq(hidden_state)
-            k = self.wk(hidden_state)
-            v = self.wv(hidden_state)
-            soft_attn = F.softmax(torch.matmul(q, k.transpose(0, 1)) / np.sqrt(self.qk_hid_size), dim=1)
-            soft_attn = soft_attn.unsqueeze(-1).expand(n, n, self.value_hid_size)
-            soft_attn = soft_attn.unsqueeze(0).expand(batch_size, n, n, self.value_hid_size)
-            
             # Choose current or prev depending on recurrent
-            comm = v.view(batch_size, n, self.value_hid_size) if self.args.recurrent else v
+            comm = hidden_state.view(batch_size, n, self.hid_size) if self.args.recurrent else hidden_state
+
+            #########################################################
+            # [TarMAC changeset] Don't expand same comm vector to all
+            #########################################################
             # Get the next communication vector based on next hidden state
-            comm = comm.unsqueeze(-2).expand(-1, n, n, self.value_hid_size)
+            # comm = comm.unsqueeze(-2).expand(-1, n, n, self.hid_size)
+            #########################################################
+
+            ########################################################
+            # [TarMAC changeset] Removing self-communication masking
+            ########################################################
+            # # Create mask for masking self communication
+            # mask = self.comm_mask.view(1, n, n)
+            # mask = mask.expand(comm.shape[0], n, n)
+            # mask = mask.unsqueeze(-1)
+            # mask = mask.expand_as(comm)
+            # comm = comm * mask
+            ########################################################
+
+            ############################################################
+            # [TarMAC changeset] Replacing averaging with soft-attention
+            ############################################################
+            # if hasattr(self.args, 'comm_mode') and self.args.comm_mode == 'avg' \
+            #     and num_agents_alive > 1:
+            #     comm = comm / (num_agents_alive - 1)
+            ############################################################
+
+            # if info['comm_action'].sum() != 0:
+            #     import pdb; pdb.set_trace()
+
+            #########################################################
+            # [TarMAC changeset] Attentional communication b/w agents
+            #########################################################
+            # compute q, k, c
+            query = self.state2query(comm)
+            key = self.state2key(comm)
+            value = self.state2value(comm)
+
+            # scores
+            scores = torch.matmul(query, key.transpose(
+                -2, -1)) / math.sqrt(self.hid_size)
+            # scores = scores.masked_fill(comm_action_mask.squeeze(-1) == 0, -1e9)
+            # Use agent_mask instead of comm_action_mask to make this work in tj env
+            scores = scores.masked_fill(agent_mask.squeeze(-1) == 0, -1e9)
+
+            # softmax + weighted sum
+            attn = F.softmax(scores, dim=-1)
+            comm = torch.matmul(attn, value)
             
-            # Mask comm_in
-            # Mask communcation from dead agents
-            comm = comm * agent_mask
-            # Mask communication to dead agents
-            comm = comm * agent_mask_transpose
+            ####################################################
+            # [TarMAC changeset] Incorporated this masking above
+            ####################################################
+            # # Mask comm_in
+            # # Mask communcation from dead agents
+            # comm = comm * agent_mask
+            # # Mask communication to dead agents
+            # comm = comm * agent_mask_transpose
+            ###########################################################
 
-            # Combine all of C_j for an ith agent which essentially are h_j
-            comm_sum = (comm * soft_attn.transpose(1, 2)).sum(dim=1)
-            c = self.C_modules[i](comm_sum)
+            ###########################################################
+            # [TarMAC changeset] Replaced this averaging with attention
+            ###########################################################
+            # # Combine all of C_j for an ith agent which essentially are h_j
+            # comm_sum = comm.sum(dim=1)
+            ###########################################################
 
+            c = self.C_modules[i](comm)
 
             if self.args.recurrent:
                 # skip connection - combine comm. matrix and encoded input for all agents

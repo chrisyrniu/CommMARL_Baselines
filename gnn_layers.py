@@ -10,10 +10,11 @@ class GraphConvolution(nn.Module):
     Simple GCN layer, similar to https://arxiv.org/abs/1609.02907
     """
 
-    def __init__(self, in_features, out_features, bias=True):
+    def __init__(self, in_features, out_features, bias=True, all_self_loop=False):
         super(GraphConvolution, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
+        self.all_self_loop = all_self_loop
         self.weight = nn.Parameter(torch.FloatTensor(in_features, out_features))
         if bias:
             self.bias = nn.Parameter(torch.FloatTensor(out_features))
@@ -28,8 +29,16 @@ class GraphConvolution(nn.Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input, adj):
-        support = torch.mm(input, self.weight)
-        output = torch.spmm(adj, support)
+        N = input.size()[0]
+        
+        if self.all_self_loop:
+            adj = torch.eye(N, N) + adj * (torch.ones(N, N) - torch.eye(N, N))        
+        
+        degrees = adj.sum(dim=1)
+        normalized_D = torch.diag_embed(degrees.pow(-0.5))
+        normalized_adj = torch.mm(torch.mm(normalized_D, adj), normalized_D)
+        support = torch.mm(input.float(), self.weight)
+        output = torch.mm(normalized_adj.float(), support)
         if self.bias is not None:
             return output + self.bias
         else:
@@ -41,19 +50,16 @@ class GraphConvolution(nn.Module):
                + str(self.out_features) + ')'
 
     
-# Revised from https://github.com/Diego999/pyGAT/blob/master/layers.py
 class GraphAttention(nn.Module):
-    """
-    Simple GAT layer, similar to https://arxiv.org/abs/1710.10903
-    """
 
-    def __init__(self, in_features, out_features, dropout, negative_slope, num_heads=1, bias=True):
+    def __init__(self, in_features, out_features, dropout, negative_slope, num_heads=1, bias=True, all_self_loop=False):
         super(GraphAttention, self).__init__()
         self.dropout = dropout
         self.in_features = in_features
         self.out_features = out_features
         self.negative_slope = negative_slope
         self.num_heads = num_heads
+        self.all_self_loop = all_self_loop
 
         self.W = nn.Parameter(torch.zeros(size=(in_features, num_heads * out_features)))
         self.a_i = nn.Parameter(torch.zeros(size=(num_heads, out_features, 1)))
@@ -80,6 +86,9 @@ class GraphAttention(nn.Module):
         # h size: N * num_heads * out_features
         h = torch.mm(input, self.W).view(-1, self.num_heads, self.out_features)
         N = h.size()[0]
+    
+        if self.all_self_loop:
+            adj = torch.eye(N, N) + adj * (torch.ones(N, N) - torch.eye(N, N))
         
         e = []
         # a_i, a_j size: num_heads * out_features * 1

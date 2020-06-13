@@ -9,7 +9,6 @@ import itertools
 from models import MLP
 from action_utils import select_action, translate_action
 from gnn_layers import GraphAttention
-from gnn_layers import GraphConvolution
 
 class GCommNetMLP(nn.Module):
     def __init__(self, args, num_inputs):
@@ -29,9 +28,10 @@ class GCommNetMLP(nn.Module):
             self.gconv2 = GraphAttention(args.hid_size, args.hid_size, dropout=dropout, negative_slope=negative_slope, num_heads=1)
             
             
-        if args.gnn_type == 'gcn':
-            self.gconv1 = GraphConvolution(args.hid_size, args.hid_size, all_self_loop=True)
-            self.gconv2 = GraphConvolution(args.hid_size, args.hid_size, all_self_loop=True)
+#         if args.gnn_type == 'gcn':
+#             self.gconv1 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
+#             self.gconv2 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
+#             self.gconv3 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
         
         self.hard_attn1 = nn.Sequential(
             nn.Linear(self.hid_size*2, int(self.hid_size/2)),
@@ -55,7 +55,7 @@ class GCommNetMLP(nn.Module):
             self.action_log_std = nn.Parameter(torch.zeros(1, args.dim_actions))
         else:
             # support multi action
-            self.heads = nn.ModuleList([nn.Linear(args.hid_size*2, o)
+            self.heads = nn.ModuleList([nn.Linear(args.hid_size, o)
                                         for o in args.naction_heads])
         self.init_std = args.init_std if hasattr(args, 'comm_init_std') else 0.2
 
@@ -177,22 +177,6 @@ class GCommNetMLP(nn.Module):
         num_agents_alive, agent_mask = self.get_agent_mask(batch_size, info)
 
         for i in range(self.comm_passes):
-            if self.args.recurrent:
-                # skip connection - combine comm. matrix and encoded input for all agents
-                x = x.squeeze()
-                inp = x
-                
-                output = self.f_module(inp, (hidden_state, cell_state))
-
-                hidden_state = output[0]
-                cell_state = output[1]
-
-            else: # MLP|RNN
-                # Get next hidden state from f node
-                # and Add skip connection from start and sum them
-                hidden_state = sum([x, self.f_modules[i](hidden_state), c])
-                hidden_state = self.tanh(hidden_state)
-            
             # Choose current or prev depending on recurrent
             comm = hidden_state
 
@@ -210,20 +194,31 @@ class GCommNetMLP(nn.Module):
             if self.args.gnn_type == 'gat':
                 comm = F.elu(self.gconv1(comm, adj))
                 comm = self.gconv2(comm, adj)
-                
-            if self.args.gnn_type == 'gcn':
-                comm = F.relu(self.gconv1(comm, adj))
-                comm = self.gconv2(comm, adj)
         
             # Mask communication to dead agents
             comm = comm * agent_mask
             c = self.C_modules[i](comm)
 
+            if self.args.recurrent:
+                # skip connection - combine comm. matrix and encoded input for all agents
+                x = x.squeeze()
+                inp = x + c
+                
+                output = self.f_module(inp, (hidden_state, cell_state))
+
+                hidden_state = output[0]
+                cell_state = output[1]
+
+            else: # MLP|RNN
+                # Get next hidden state from f node
+                # and Add skip connection from start and sum them
+                hidden_state = sum([x, self.f_modules[i](hidden_state), c])
+                hidden_state = self.tanh(hidden_state)
+
         # v = torch.stack([self.value_head(hidden_state[:, i, :]) for i in range(n)])
         # v = v.view(hidden_state.size(0), n, -1)
         value_head = self.value_head(hidden_state)
         h = hidden_state.view(batch_size, n, self.hid_size)
-        c = c.view(batch_size, n, self.hid_size)
 
         if self.continuous:
             action_mean = self.action_mean(h)
@@ -233,7 +228,7 @@ class GCommNetMLP(nn.Module):
             action = (action_mean, action_log_std, action_std)
         else:
             # discrete actions
-            action = [F.log_softmax(head(torch.cat((h, c), dim=-1)), dim=-1) for head in self.heads]
+            action = [F.log_softmax(head(h), dim=-1) for head in self.heads]
 
         if self.args.recurrent:
             return action, value_head, (hidden_state.clone(), cell_state.clone())

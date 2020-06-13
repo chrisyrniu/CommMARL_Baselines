@@ -9,7 +9,6 @@ import itertools
 from models import MLP
 from action_utils import select_action, translate_action
 from gnn_layers import GraphAttention
-from gnn_layers import GraphConvolution
 
 class GCommNetMLP(nn.Module):
     def __init__(self, args, num_inputs):
@@ -29,9 +28,10 @@ class GCommNetMLP(nn.Module):
             self.gconv2 = GraphAttention(args.hid_size, args.hid_size, dropout=dropout, negative_slope=negative_slope, num_heads=1)
             
             
-        if args.gnn_type == 'gcn':
-            self.gconv1 = GraphConvolution(args.hid_size, args.hid_size, all_self_loop=True)
-            self.gconv2 = GraphConvolution(args.hid_size, args.hid_size, all_self_loop=True)
+#         if args.gnn_type == 'gcn':
+#             self.gconv1 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
+#             self.gconv2 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
+#             self.gconv3 = GCNConv(args.hid_size, args.hid_size, cached=False, normalize=False)
         
         self.hard_attn1 = nn.Sequential(
             nn.Linear(self.hid_size*2, int(self.hid_size/2)),
@@ -209,10 +209,6 @@ class GCommNetMLP(nn.Module):
 
             if self.args.gnn_type == 'gat':
                 comm = F.elu(self.gconv1(comm, adj))
-                comm = self.gconv2(comm, adj)
-                
-            if self.args.gnn_type == 'gcn':
-                comm = F.relu(self.gconv1(comm, adj))
                 comm = self.gconv2(comm, adj)
         
             # Mask communication to dead agents

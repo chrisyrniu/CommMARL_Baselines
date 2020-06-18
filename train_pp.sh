@@ -3,16 +3,16 @@ export OMP_NUM_THREADS=1
 
 python -u main.py \
   --env_name predator_prey \
-  --nagents 5 \
-  --dim 10 \
-  --max_steps 40 \
+  --nagents 10 \
+  --dim 20 \
+  --max_steps 80 \
   --vision 1 \
-  --nprocesses 4 \
+  --nprocesses 16 \
   --num_epochs 1000 \
   --epoch_size 10 \
   --hid_size 128 \
   --value_hid_size 32 \
-  --value_coeff 0.08 \
+  --value_coeff 0.02 \
   --detach_gap 10 \
   --lrate 0.0009 \
   --gcomm \
@@ -21,9 +21,11 @@ python -u main.py \
   --directed \
   --recurrent \
   --seed 0 \
+  --save \
+  --save_every 500 \
   --plot \
-  --plot_env pp_medium_new_gcomm_gat_hid_128_seed0_run17 \
-  --plot_port 8097 \
+  --plot_env pp_hard_new_gcomm_gat_hid_128_seed0_run9 \
+  --plot_port 8009 \
   | tee train_pp.log
 
 

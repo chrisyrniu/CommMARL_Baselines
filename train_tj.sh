@@ -6,24 +6,27 @@ python -u main.py \
   --nagents 10 \
   --dim 14 \
   --max_steps 40 \
-  --add_rate_min 0.1 \
-  --add_rate_max 0.1 \
+  --add_rate_min 0.05 \
+  --add_rate_max 0.2 \
   --difficulty medium \
   --vision 0 \
-  --nprocesses 4 \
-  --num_epochs 500 \
+  --nprocesses 16 \
+  --num_epochs 2000 \
   --epoch_size 10 \
   --hid_size 128 \
   --detach_gap 10 \
-  --lrate 0.0005 \
+  --lrate 0.001 \
+  --value_coeff 0.01 \
   --ic3net \
-  --tarcomm \
   --recurrent \
-  --curr_start 500 \
-  --curr_end 500 \
+  --curr_start 250 \
+  --curr_end 1250 \
   --save \
-  --save_every 100 \
-  --seed 0 \
+  --save_every 1000 \
+  --seed 3780 \
+  --plot \
+  --plot_env exp_tj_medium_ic3net_seed3780 \
+  --plot_port 8009 \
   | tee train_tj.log
 
 #   --plot \

@@ -79,7 +79,7 @@ class GACommNetMLP(nn.Module):
         # Init weights for linear layers
         # self.apply(self.init_weights)
 
-        self.value_head = nn.Linear(self.hid_size, 1)
+        self.value_head = nn.Linear(2*self.hid_size, 1)
 
         # hard attention layers to form the graph 
         self.lstm = nn.LSTM(args.hid_size * 2, args.hid_size * 2, bidirectional=True)
@@ -226,7 +226,7 @@ class GACommNetMLP(nn.Module):
             comm = comm.view(batch_size, n, self.hid_size)
             comm = comm * agent_mask
 
-        value_head = self.value_head(hidden_state)
+        value_head = self.value_head(torch.cat((hidden_state, comm.view(batch_size*n, self.hid_size)), dim=-1))
         h = hidden_state.view(batch_size, n, self.hid_size)
 
         if self.continuous:
@@ -237,7 +237,7 @@ class GACommNetMLP(nn.Module):
             action = (action_mean, action_log_std, action_std)
         else:
             # discrete actions
-            action = [F.log_softmax(head(torch.cat([h, comm], dim=-1)), dim=-1) for head in self.heads]
+            action = [F.log_softmax(head(torch.cat((h, comm), dim=-1)), dim=-1) for head in self.heads]
 
         if self.args.recurrent:
             return action, value_head, (hidden_state.clone(), cell_state.clone())

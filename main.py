@@ -219,10 +219,10 @@ if not args.display:
 for p in policy_net.parameters():
     p.data.share_memory_()
 
-disp_trainer = Trainer(args, policy_net, data.init(args.env_name, args, False))
-disp_trainer.display = True
-def disp():
-    x = disp_trainer.get_episode()
+# disp_trainer = Trainer(args, policy_net, data.init(args.env_name, args, False))
+# disp_trainer.display = True
+# def disp():
+#     x = disp_trainer.get_episode()
 
 if args.env_name == 'grf':
     args.render = render

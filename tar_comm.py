@@ -175,6 +175,7 @@ class TarCommNetMLP(nn.Module):
         n = self.nagents
 
         num_agents_alive, agent_mask = self.get_agent_mask(batch_size, info)
+        agent_mask_alive = agent_mask.clone()
 
         # Hard Attention - action whether an agent communicates or not
         if self.args.hard_attn:
@@ -235,6 +236,8 @@ class TarCommNetMLP(nn.Module):
 
             # softmax + weighted sum
             attn = F.softmax(scores, dim=-1)
+            # if the scores are all -1e9 for all agents, the attns should be all 0
+            attn = attn * agent_mask.squeeze(-1) # cannot use inplace operation *=
             comm = torch.matmul(attn, value)
             
             ####################################################
@@ -253,7 +256,9 @@ class TarCommNetMLP(nn.Module):
             # # Combine all of C_j for an ith agent which essentially are h_j
             # comm_sum = comm.sum(dim=1)
             ###########################################################
-
+            # for tj: dead agents do not receive messages
+            # for tj: alive agents with no comm actions can receive messages (align with tarmac+ic3net in pp)
+            comm *= agent_mask_alive.squeeze(-1)[:, 0].unsqueeze(-1).expand(batch_size, n, self.hid_size)
             c = self.C_modules[i](comm)
 
             if self.args.recurrent:

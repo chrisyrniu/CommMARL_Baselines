@@ -8,23 +8,19 @@ python -u main.py \
   --max_steps 80 \
   --vision 1 \
   --nprocesses 16 \
-  --num_epochs 1000 \
+  --num_epochs 500 \
   --epoch_size 10 \
   --hid_size 128 \
-  --value_hid_size 32 \
-  --value_coeff 0.02 \
+  --value_coeff 0.03 \
   --detach_gap 10 \
-  --lrate 0.0009 \
-  --gcomm \
-  --gnn_type gat \
-  --self_loop \
-  --directed \
+  --lrate 0.0007 \
+  --gacomm \
   --recurrent \
   --seed 0 \
   --save \
   --save_every 500 \
   --plot \
-  --plot_env pp_hard_new_gcomm_gat_hid_128_seed0_run9 \
+  --plot_env exp_pp_hard_gacomm_seed0_lr0.0007_vc0.03 \
   --plot_port 8009 \
   | tee train_pp.log
 

@@ -322,7 +322,7 @@ def run(num_epochs):
         if 'add_rate' in stat.keys():
             print('Add-Rate: {:.2f}'.format(stat['add_rate']))
         if 'success' in stat.keys():
-            print('Success: {:.2f}'.format(stat['success']))
+            print('Success: {:.4f}'.format(stat['success']))
         if 'steps_taken' in stat.keys():
             print('Steps-Taken: {:.2f}'.format(stat['steps_taken']))
         if 'comm_action' in stat.keys():

@@ -4,7 +4,7 @@ export OMP_NUM_THREADS=1
 python -u main.py \
   --env_name grf \
   --nagents 3 \
-  --nprocesses 16 \
+  --nprocesses 1 \
   --num_epochs 300 \
   --epoch_size 10 \
   --hid_size 128 \

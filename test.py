@@ -11,7 +11,10 @@ import visdom
 import data
 from models import *
 from comm import CommNetMLP
-from gccomm import GCCommNetMLP
+from gc_comm import GCCommNetMLP
+from ga_comm import GACommNetMLP
+from gcomm import GCommNetMLP
+from tar_comm import TarCommNetMLP
 from utils import *
 from action_utils import parse_action_args
 from trainer import Trainer
@@ -39,8 +42,18 @@ parser.add_argument('--nprocesses', type=int, default=16,
 # model
 parser.add_argument('--hid_size', default=64, type=int,
                     help='hidden layer size')
+parser.add_argument('--qk_hid_size', default=16, type=int,
+                    help='key and query size for soft attention')
+parser.add_argument('--value_hid_size', default=32, type=int,
+                    help='value size for soft attention')
 parser.add_argument('--recurrent', action='store_true', default=False,
                     help='make the model recurrent in time')
+parser.add_argument('--directed', action='store_true', default=False,
+                    help='if the graph formed by the agents is directed')
+parser.add_argument('--self_loop', action='store_true', default=False,
+                    help='if self loop in gnn')
+parser.add_argument('--gnn_type', default='gat', type=str,
+                    help='type of gnn to use (gcn|gat)')
 # optimization
 parser.add_argument('--gamma', type=float, default=1.0,
                     help='discount factor')
@@ -82,6 +95,14 @@ parser.add_argument('--commnet', action='store_true', default=False,
                     help="enable commnet model")
 parser.add_argument('--ic3net', action='store_true', default=False,
                     help="enable ic3net model")
+parser.add_argument('--gccomm', action='store_true', default=False,
+                    help="enable gccomm model (with commnet or ic3net)")
+parser.add_argument('--tarcomm', action='store_true', default=False,
+                    help="enable tarmac model (with commnet or ic3net)")
+parser.add_argument('--gacomm', action='store_true', default=False,
+                    help="enable gacomm model")
+parser.add_argument('--gcomm', action='store_true', default=False,
+                    help="enable gcomm model")
 parser.add_argument('--nagents', type=int, default=1,
                     help="Number of agents (used in multiagent)")
 parser.add_argument('--comm_mode', type=str, default='avg',
@@ -121,6 +142,11 @@ if args.ic3net:
     # importance of individual rewards even in cooperative games
     if args.env_name == "traffic_junction":
         args.comm_action_one = True
+
+if args.gacomm or args.gcomm:
+    args.commnet = 1
+    args.mean_ratio = 0
+
 # Enemy comm
 args.nfriendly = args.nagents
 if hasattr(args, 'enemy_comm') and args.enemy_comm:
@@ -163,8 +189,17 @@ torch.manual_seed(args.seed)
 
 print(args)
 
-if args.commnet:
-    policy_net = GCCommNetMLP(args, num_inputs)
+if args.gcomm:
+    policy_net = GCommNetMLP(args, num_inputs)
+elif args.gacomm:
+    policy_net = GACommNetMLP(args, num_inputs)
+elif args.commnet:
+    if args.gccomm:
+        policy_net = GCCommNetMLP(args, num_inputs)
+    elif args.tarcomm:
+        policy_net = TarCommNetMLP(args, num_inputs)
+    else:
+        policy_net = CommNetMLP(args, num_inputs)
 elif args.random:
     policy_net = Random(args, num_inputs)
 elif args.recurrent:
@@ -191,10 +226,30 @@ else:
     trainer = Trainer(args, policy_net, data.init(args.env_name, args))
 
 
-if args.ic3net:
+if args.gcomm:
+    model_dir = Path('./saved') / args.env_name / 'gcomm' / args.gnn_type
+elif args.gacomm:
+    model_dir = Path('./saved') / args.env_name / 'gacomm'
+elif args.gccomm:
+    if args.ic3net:
+        model_dir = Path('./saved') / args.env_name / 'gc_ic3net'
+    elif args.commnet:
+        model_dir = Path('./saved') / args.env_name / 'gc_commnet'
+    else:
+        model_dir = Path('./saved') / args.env_name / 'other'
+elif args.tarcomm:
+    if args.ic3net:
+        model_dir = Path('./saved') / args.env_name / 'tar_ic3net'
+    elif args.commnet:
+        model_dir = Path('./saved') / args.env_name / 'tar_commnet'
+    else:
+        model_dir = Path('./saved') / args.env_name / 'other'
+elif args.ic3net:
     model_dir = Path('./saved') / args.env_name / 'ic3net'
-if args.commnet and not args.ic3net:
+elif args.commnet:
     model_dir = Path('./saved') / args.env_name / 'commnet'
+else:
+    model_dir = Path('./saved') / args.env_name / 'other'
 if args.env_name == 'grf':
     model_dir = model_dir / args.scenario
 curr_run = 'run' + str(args.run_num)

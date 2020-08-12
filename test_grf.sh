@@ -10,14 +10,15 @@ python -u test.py \
   --detach_gap 10 \
   --lrate 0.001 \
   --max_steps 100 \
-  --ic3net \
+  --commnet \
   --recurrent \
   --scenario academy_3_vs_1_with_keeper \
   --num_controlled_lagents 3 \
   --num_controlled_ragents 0 \
   --reward_type scoring \
   --run_num 1 \
-  --ep_num 250 \
+  --ep_num 0 \
+  --render \
   | tee test.log
 
 #  --render \

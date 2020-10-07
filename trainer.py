@@ -50,7 +50,11 @@ class Trainer(object):
                     prev_hid = self.policy_net.init_hidden(batch_size=state.shape[0])
 
                 x = [state, prev_hid]
-                action_out, value, prev_hid = self.policy_net(x, info)
+                
+                if self.args.gacomm:
+                    action_out, value, prev_hid, comm_density = self.policy_net(x, info)
+                else:
+                    action_out, value, prev_hid = self.policy_net(x, info)
 
                 if (t + 1) % self.args.detach_gap == 0:
                     if self.args.rnn_type == 'LSTM':
@@ -59,8 +63,15 @@ class Trainer(object):
                         prev_hid = prev_hid.detach()
             else:
                 x = state
-                action_out, value = self.policy_net(x, info)
+                if self.args.gacomm:
+                    action_out, value, comm_density = self.policy_net(x, info)
+                else:
+                    action_out, value = self.policy_net(x, info)             
 
+            if self.args.gacomm:
+                stat['density1'] = stat.get('density1', 0) + comm_density[0]
+                stat['density2'] = stat.get('density2', 0) + comm_density[1]               
+            
             action = select_action(self.args, action_out)
             action, actual = translate_action(self.args, self.env, action)
             next_state, reward, done, info = self.env.step(actual)

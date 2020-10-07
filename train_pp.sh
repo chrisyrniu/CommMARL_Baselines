@@ -11,16 +11,16 @@ python -u main.py \
   --num_epochs 500 \
   --epoch_size 10 \
   --hid_size 128 \
-  --value_coeff 0.03 \
+  --value_coeff 0.01 \
   --detach_gap 10 \
-  --lrate 0.0007 \
+  --lrate 0.001 \
   --gacomm \
   --recurrent \
-  --seed 0 \
+  --seed 2333 \
   --save \
   --save_every 500 \
   --plot \
-  --plot_env exp_pp_hard_gacomm_seed0_lr0.0007_vc0.03 \
+  --plot_env exp_pp_hard_gacomm_seed2333 \
   --plot_port 8009 \
   | tee train_pp.log
 

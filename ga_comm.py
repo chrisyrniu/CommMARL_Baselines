@@ -99,8 +99,7 @@ class GACommNetMLP(nn.Module):
             agent_mask = torch.ones(n)
             num_agents_alive = n
 
-        agent_mask = agent_mask.view(1, n)
-        agent_mask = agent_mask.expand(batch_size, n).unsqueeze(-1).clone() # clone gives the full tensor and avoid the error
+        agent_mask = agent_mask.view(n, 1).clone()
 
         return num_agents_alive, agent_mask
 
@@ -181,50 +180,63 @@ class GACommNetMLP(nn.Module):
                 # bugs to be fixed 
                 hidden_state = sum([x, self.f_modules[i](hidden_state), c])
                 hidden_state = self.tanh(hidden_state)
+            
+            if not self.args.comm_mask_zero:
+                if not self.args.comm_action_one:
+                    # TO DO: should do batch-wise
+                    h0 = torch.zeros(2, batch_size * n, self.hid_size * 2, requires_grad=True)
+                    c0 = torch.zeros(2, batch_size * n, self.hid_size * 2, requires_grad=True)
 
+                    # according to the paper, there is no self-attend 
+                    list1 = []
+                    for a in range(batch_size * n):
+                        list2 = [torch.cat([hidden_state[a], hidden_state[b]]) for b in range(batch_size * n) if b != a]
+                        # for b in range(batch_size * n):
+                        #     if a != b:
+                        #         list2.append(torch.cat([hidden_state[a], hidden_state[b]]))
+                        list1.append(torch.stack(list2))
+                    # hard_attn_input: size of (N-1) x N x (hid_size*2)
+                    hard_attn_input = torch.stack(list1, dim=1)
+                    # hard_attn_output: size of (N-1) x N x 2, the third dimension is one-hot vector
+                    hard_attn_output = self.lstm(hard_attn_input, (h0, c0))[0]
+                    hard_attn_output = self.linear(hard_attn_output)
+                    hard_attn_output = F.gumbel_softmax(hard_attn_output, hard=True) 
+                    # hard_attn_output: size of (N-1) x N x 1
+                    hard_attn_output = torch.narrow(hard_attn_output, 2, 1, 1)
+                    # hard_attn_output: size of N x (N-1)
+                    hard_attn_output = hard_attn_output.permute(1, 0, 2).squeeze()
+                else:
+                    hard_attn_output = self.get_hard_attn_one(agent_mask)
+
+                comm_density1 = hard_attn_output.nonzero().size(0) / (n*n)
+                comm_density2 = hard_attn_output.nonzero().size(0) / (n*(n-1))
                 
-            # TO DO: should do batch-wise
-            h0 = torch.zeros(2, batch_size * n, self.hid_size * 2, requires_grad=True)
-            c0 = torch.zeros(2, batch_size * n, self.hid_size * 2, requires_grad=True)
-
-            # according to the paper, there is no self-attend 
-            list1 = []
-            for a in range(batch_size * n):
-                list2 = [torch.cat([hidden_state[a], hidden_state[b]]) for b in range(batch_size * n) if b != a]
-                # for b in range(batch_size * n):
-                #     if a != b:
-                #         list2.append(torch.cat([hidden_state[a], hidden_state[b]]))
-                list1.append(torch.stack(list2))
-            # hard_attn_input: size of (N-1) x N x (hid_size*2)
-            hard_attn_input = torch.stack(list1, dim=1)
-            # hard_attn_output: size of (N-1) x N x 2, the third dimension is one-hot vector
-            hard_attn_output = self.lstm(hard_attn_input, (h0, c0))[0]
-            hard_attn_output = self.linear(hard_attn_output)
-            hard_attn_output = F.gumbel_softmax(hard_attn_output, hard=True) 
-            # hard_attn_output: size of (N-1) x N x 1
-            hard_attn_output = torch.narrow(hard_attn_output, 2, 1, 1)
-            # hard_attn_output: size of N x (N-1)
-            hard_attn_output = hard_attn_output.permute(1, 0, 2).squeeze()
-
-            # calculate query and key for soft attention
-            q = self.wq(hidden_state)
-            k = self.wk(hidden_state)
-            # size of N x N
-            soft_attn = torch.matmul(q, k.transpose(0, 1)) / np.sqrt(self.qk_hid_size)
-            # size of N x (N-1)
-            soft_attn = torch.stack([torch.cat([soft_attn[l][:l], soft_attn[l][l+1:batch_size*n]]) for l in range(batch_size*n)])
-            soft_attn = soft_attn * hard_attn_output
-            soft_attn = F.softmax(soft_attn, dim=1)
-            attn = soft_attn * hard_attn_output
-
-            # Choose current or prev depending on recurrent
-            comm = hidden_state.view(batch_size, n, self.hid_size) if self.args.recurrent else hidden_state
-            comm = comm * agent_mask
-            comm = comm.view(batch_size * n, self.hid_size)
-            # can also add 0 for self-connections in attn, and act like tar_comm, can try to cross-verify
-            comm = torch.stack([(attn[l].reshape(batch_size*n-1,1)*torch.cat([comm[:l], comm[l+1:batch_size*n]], dim=0)).sum(dim=0) for l in range(batch_size*n)], dim=0)
-            comm = comm.view(batch_size, n, self.hid_size)
-            comm = comm * agent_mask
+                # calculate query and key for soft attention
+                q = self.wq(hidden_state)
+                k = self.wk(hidden_state)
+                # size of N x N
+                soft_attn = torch.matmul(q, k.transpose(0, 1)) / np.sqrt(self.qk_hid_size)
+                # size of N x (N-1)
+                soft_attn = torch.stack([torch.cat([soft_attn[l][:l], soft_attn[l][l+1:batch_size*n]]) for l in range(batch_size*n)])
+                soft_attn = soft_attn * hard_attn_output
+                soft_attn = F.softmax(soft_attn, dim=1)
+                attn = soft_attn * hard_attn_output
+                
+                # Choose current or prev depending on recurrent
+                comm = hidden_state.view(batch_size, n, self.hid_size) if self.args.recurrent else hidden_state
+                comm = comm * agent_mask
+                comm = comm.view(batch_size * n, self.hid_size)
+                # can also add 0 for self-connections in attn, and act like tar_comm, can try to cross-verify
+                comm = torch.stack([(attn[l].reshape(batch_size*n-1,1)*torch.cat([comm[:l], comm[l+1:batch_size*n]], dim=0)).sum(dim=0) for l in range(batch_size*n)], dim=0)
+                comm = comm.view(batch_size, n, self.hid_size)
+                comm = comm * agent_mask
+            else:
+                comm = torch.zeros(batch_size, n, self.hid_size) if self.args.recurrent else torch.zeros(hidden_state.size())
+                comm_density1 = 0
+                comm_density2 = 0
+                
+#             print('1', comm_density1)
+#             print('2', comm_density2)
 
         value_head = self.value_head(torch.cat((hidden_state, comm.view(batch_size*n, self.hid_size)), dim=-1))
         h = hidden_state.view(batch_size, n, self.hid_size)
@@ -240,9 +252,9 @@ class GACommNetMLP(nn.Module):
             action = [F.log_softmax(head(torch.cat((h, comm), dim=-1)), dim=-1) for head in self.heads]
 
         if self.args.recurrent:
-            return action, value_head, (hidden_state.clone(), cell_state.clone())
+            return action, value_head, (hidden_state.clone(), cell_state.clone()), [comm_density1, comm_density2]
         else:
-            return action, value_head
+            return action, value_head, [comm_density1, comm_density2]
 
     def init_weights(self, m):
         if type(m) == nn.Linear:
@@ -252,3 +264,15 @@ class GACommNetMLP(nn.Module):
         # dim 0 = num of layers * num of direction
         return tuple(( torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True),
                        torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True)))
+    
+    def get_hard_attn_one(self, agent_mask):
+        n = self.args.nagents
+        adj = torch.ones(n, n)
+        agent_mask = agent_mask.expand(n, n)
+        agent_mask_transpose = agent_mask.transpose(0, 1)
+        adj = adj * agent_mask * agent_mask_transpose
+        hard_attn = torch.stack([torch.cat([adj[x][:x], adj[x][x+1:n]]) for x in range(n)])
+#         print('1', agent_mask)
+#         print('2', hard_attn)
+
+        return hard_attn

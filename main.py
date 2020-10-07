@@ -152,6 +152,8 @@ if args.ic3net:
 if args.gacomm or args.gcomm:
     args.commnet = 1
     args.mean_ratio = 0
+    if args.env_name == "traffic_junction":
+        args.comm_action_one = True
 
 # Enemy comm
 args.nfriendly = args.nagents
@@ -244,6 +246,8 @@ log['enemy_comm'] = LogField(list(), True, 'epoch', 'num_steps')
 log['value_loss'] = LogField(list(), True, 'epoch', 'num_steps')
 log['action_loss'] = LogField(list(), True, 'epoch', 'num_steps')
 log['entropy'] = LogField(list(), True, 'epoch', 'num_steps')
+log['density1'] = LogField(list(), True, 'epoch', 'num_steps')
+log['density2'] = LogField(list(), True, 'epoch', 'num_steps')
 
 if args.plot:
     vis = visdom.Visdom(env=args.plot_env, port=args.plot_port)
@@ -330,6 +334,11 @@ def run(num_epochs):
             print('Comm-Action: {}'.format(stat['comm_action']))
         if 'enemy_comm' in stat.keys():
             print('Enemy-Comm: {}'.format(stat['enemy_comm']))
+        if 'density1' in stat.keys():
+            print('density1: {:.4f}'.format(stat['density1']))
+        if 'density2' in stat.keys():
+            print('density2: {:.4f}'.format(stat['density2']))        
+
 
         if args.plot:
             for k, v in log.items():
